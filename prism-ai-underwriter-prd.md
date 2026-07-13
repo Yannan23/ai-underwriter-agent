@@ -284,10 +284,33 @@ All request/response bodies are Zod contracts shared with the frontend package.
 
 ## 12. Deployment & Environments
 
-- **Container:** single Docker image (Hono server + pipeline workers). 
-- **CI/CD (GitHub Actions):** typecheck → unit tests (Vitest, mock mode) → Promptfoo eval gate → build image → deploy. Eval regression fails the pipeline.
-- **Environments:** `dev` (mock mode default), `staging` (real models, synthetic data), `prod`. Secrets (Anthropic, Voyage, Supabase service key) via environment; never in code or logs.
-- **Cost controls:** prompt caching on stable prefixes (system prompt, guideline preamble); per-application token budget alarm; Haiku-first routing.
+### Hosting & topology
+- **Container:** single Docker image (Hono server + pipeline workers), deployed on **Railway** (managed container hosting). Kubernetes is deliberately out of scope at this scale — one stateless service + managed Supabase gains nothing from a cluster. The image is standard OCI and the service is stateless (all state in Supabase), so migrating to EKS/GKE — or shipping a Helm chart for a customer-VPC deployment (a realistic ask in insurance) — is a contained, later effort.
+- **Environments:** `dev` (mock mode default), `staging` (real models, synthetic data), `prod`. Secrets (Anthropic, Voyage, Supabase service key) via environment; never in code or logs; least-privilege keys per environment.
+
+### CI/CD (GitHub Actions)
+- Every push: typecheck → unit tests (Vitest, mock mode) → build image tagged with **git SHA** (never bare `latest`) → deploy on merge to `main`.
+- **Eval gate is path-scoped:** the full Promptfoo suite runs only when prompts, guidelines, routing, or model config change (plus a nightly full run); ordinary code commits run typecheck + unit tests only. Eval regression fails the pipeline.
+- **Database migrations** are versioned SQL in `supabase/migrations/`, applied automatically per environment in the deploy job — schema can never drift between dev/staging/prod.
+
+### Release safety
+- **Rollback:** SHA-tagged image history + one-click redeploy of any previous version. Rollback is the first-class failure response; fix-forward is optional.
+- **Resumable pipeline across deploys:** a deploy must not kill in-flight underwriting runs. Every stage is **idempotent and re-entrant** — on restart, an application resumes from its last completed stage (the `applications` status machine is the source of truth), never re-runs from scratch and never wedges.
+- **Graceful shutdown:** on SIGTERM the container stops accepting new work, lets in-flight stages complete within a drain window, and closes SSE connections cleanly (clients reconnect and resume from persisted stage state).
+- **Health checks:** liveness/readiness endpoint used by the platform for deploy gating and uptime monitoring.
+
+### Alerting & incident response
+- **Sentry** for exception aggregation (every error carries `request_id`/`application_id` for trace lookup).
+- **Uptime monitoring** on the health endpoint with push notification on failure.
+- Alert triggers: pipeline stage failure rate, model API error rate (429/5xx), token-budget breaches, applications stuck in a non-terminal status beyond SLA.
+
+### Data protection & residency
+- Supabase project pinned to the **Sydney region** (Australian data residency — an entry requirement for insurance customers, not a nice-to-have).
+- **PITR (point-in-time recovery)** enabled; backup restore tested, not assumed.
+- `audit_events` retention policy configured explicitly (insert-only, long-horizon retention for compliance).
+
+### Cost controls
+- Prompt caching on stable prefixes (system prompt, guideline preamble); per-application token budget alarm; Haiku-first routing.
 
 ## 13. Milestones
 
