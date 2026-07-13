@@ -1,5 +1,7 @@
 # Prism AI Underwriter Agent
 
+**🔴 Live demo: [prismunderwriting.au](https://prismunderwriting.au/)** — submit a proposal and watch all nine underwriting stages stream in real time.
+
 An AI underwriting agent for **Professional Indemnity (PI) insurance** that automates the path from broker submission to issued quote — while keeping humans accountable for every judgment call.
 
 Straightforward, in-appetite applications are quoted in **under 2 minutes** with no human touch. Medium- and high-risk submissions arrive at a human underwriter **pre-analysed**: extracted data, fired eligibility rules, cited guideline references, and a recommended decision.
