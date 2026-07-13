@@ -49,6 +49,6 @@ export const ExtractedApplication = z.object({
     knownCircumstances: z.boolean().nullable(),
   }),
   /** Per-field confidence 0–1, keyed by dot-path (e.g. "business.annualFeeIncome"). */
-  fieldConfidence: z.record(z.number().min(0).max(1)),
+  fieldConfidence: z.record(z.string(), z.number().min(0).max(1)),
 })
 export type ExtractedApplication = z.infer<typeof ExtractedApplication>

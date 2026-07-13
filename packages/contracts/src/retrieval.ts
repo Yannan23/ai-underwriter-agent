@@ -13,6 +13,6 @@ export type GuidelineChunk = z.infer<typeof GuidelineChunk>
 export const GuidelineContext = z.object({
   chunks: z.array(GuidelineChunk),
   /** Retrieval score per chunk id. */
-  retrievalScores: z.record(z.number()),
+  retrievalScores: z.record(z.string(), z.number()),
 })
 export type GuidelineContext = z.infer<typeof GuidelineContext>

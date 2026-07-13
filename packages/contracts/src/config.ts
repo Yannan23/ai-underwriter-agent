@@ -20,7 +20,7 @@ export type AppetiteConfig = z.infer<typeof AppetiteConfig>
 export const RatingConfig = z.object({
   version: z.string(),
   /** Base rate per occupation class (premium per $1M fee income, illustrative). */
-  baseRate: z.record(z.number()),
+  baseRate: z.record(z.string(), z.number()),
   /** Ascending bands; upTo=null means open-ended top band. */
   revenueBands: z.array(
     z.object({ upTo: z.number().nullable(), factor: z.number() })
@@ -30,8 +30,8 @@ export const RatingConfig = z.object({
   claimsLoadingPerClaim: z.number(),
   maxClaimsLoading: z.number(),
   excessCredits: z.array(z.object({ excess: z.number(), factor: z.number() })),
-  minimumPremium: z.record(z.number()),
+  minimumPremium: z.record(z.string(), z.number()),
   gstRate: z.number(),
-  stampDutyByState: z.record(z.number()),
+  stampDutyByState: z.record(z.string(), z.number()),
 })
 export type RatingConfig = z.infer<typeof RatingConfig>

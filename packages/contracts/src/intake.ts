@@ -4,7 +4,7 @@ import { z } from 'zod'
 export const RawSubmission = z.object({
   source: z.literal('form'),
   /** Raw proposal-form answers as submitted — extraction normalises these, never trusts them. */
-  form: z.record(z.unknown()),
+  form: z.record(z.string(), z.unknown()),
 })
 export type RawSubmission = z.infer<typeof RawSubmission>
 

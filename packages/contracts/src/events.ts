@@ -21,6 +21,6 @@ export const StageEvent = z.object({
   status: z.enum(['started', 'completed', 'failed', 'paused']),
   seq: z.number().int().nonnegative(),
   at: z.string().datetime(),
-  detail: z.record(z.unknown()).optional(),
+  detail: z.record(z.string(), z.unknown()).optional(),
 })
 export type StageEvent = z.infer<typeof StageEvent>
