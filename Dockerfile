@@ -8,7 +8,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages ./packages
 COPY apps ./apps
 COPY fixtures ./fixtures
-RUN pnpm install --frozen-lockfile
+# HUSKY=0: the root "prepare" script would otherwise fail — no .git in the image.
+RUN HUSKY=0 pnpm install --frozen-lockfile
 
 ENV NODE_ENV=production
 EXPOSE 3000
