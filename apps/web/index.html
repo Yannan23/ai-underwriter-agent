@@ -657,7 +657,7 @@
           setStage(
             stage,
             detail && detail.skipped ? 'skipped' : 'done',
-            detail && detail.skipped ? 'Skipped — no tokens' : 'Done ✓'
+            detail && detail.skipped ? 'Skipped' : 'Done ✓'
           )
         else if (status === 'paused') setStage(stage, 'paused', 'Needs info')
         else if (status === 'failed') setStage(stage, 'failed', 'Failed')
