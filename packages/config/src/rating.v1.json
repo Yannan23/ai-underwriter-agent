@@ -1,0 +1,52 @@
+{
+  "version": "rating.v1",
+  "baseRate": {
+    "management_consultant": 1800,
+    "it_consultant": 2200,
+    "accountant": 1600,
+    "bookkeeper": 1200,
+    "marketing_media": 1500,
+    "training_education": 1100
+  },
+  "revenueBands": [
+    { "upTo": 250000, "factor": 0.6 },
+    { "upTo": 500000, "factor": 0.85 },
+    { "upTo": 1000000, "factor": 1.0 },
+    { "upTo": 2000000, "factor": 1.6 },
+    { "upTo": 3000000, "factor": 2.1 },
+    { "upTo": null, "factor": 2.8 }
+  ],
+  "ilf": [
+    { "limit": 1000000, "factor": 1.0 },
+    { "limit": 2000000, "factor": 1.35 },
+    { "limit": 5000000, "factor": 1.9 },
+    { "limit": 10000000, "factor": 2.5 }
+  ],
+  "claimsLoadingPerClaim": 0.2,
+  "maxClaimsLoading": 1.5,
+  "excessCredits": [
+    { "excess": 1000, "factor": 1.0 },
+    { "excess": 5000, "factor": 0.95 },
+    { "excess": 10000, "factor": 0.9 },
+    { "excess": 25000, "factor": 0.85 }
+  ],
+  "minimumPremium": {
+    "management_consultant": 650,
+    "it_consultant": 750,
+    "accountant": 600,
+    "bookkeeper": 450,
+    "marketing_media": 550,
+    "training_education": 400
+  },
+  "gstRate": 0.1,
+  "stampDutyByState": {
+    "NSW": 0.09,
+    "VIC": 0.1,
+    "QLD": 0.09,
+    "WA": 0.1,
+    "SA": 0.11,
+    "TAS": 0.1,
+    "ACT": 0.0,
+    "NT": 0.1
+  }
+}

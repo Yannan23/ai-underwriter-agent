@@ -1,0 +1,41 @@
+{
+  "insured": {
+    "legalName": "Harbour Insights Consulting Pty Ltd",
+    "abn": "51824753556",
+    "state": "NSW",
+    "yearsInPractice": 8
+  },
+  "business": {
+    "occupation": "management consulting for mid-market retailers",
+    "occupationClass": "management_consultant",
+    "activitiesSplit": [
+      { "activity": "strategy consulting", "pct": 70 },
+      { "activity": "operational reviews", "pct": 30 }
+    ],
+    "annualFeeIncome": 850000,
+    "staffCount": 4,
+    "overseasExposure": { "usCanadaPct": 0, "otherPct": 5 }
+  },
+  "cover": {
+    "limitRequested": 1000000,
+    "excessPreference": 5000,
+    "retroactiveDate": "2018-07-01"
+  },
+  "history": {
+    "claimsLast5Years": [],
+    "priorInsurance": true,
+    "everDeclinedOrCancelled": false,
+    "insolvencyEvents": false,
+    "knownCircumstances": false
+  },
+  "fieldConfidence": {
+    "insured.legalName": 0.99,
+    "insured.abn": 0.97,
+    "insured.state": 0.99,
+    "business.occupation": 0.95,
+    "business.occupationClass": 0.92,
+    "business.annualFeeIncome": 0.96,
+    "cover.limitRequested": 0.98,
+    "history.claimsLast5Years": 0.94
+  }
+}

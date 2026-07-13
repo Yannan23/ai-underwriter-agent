@@ -1,0 +1,12 @@
+{
+  "name": "ai-underwriter-agent",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @prism/api dev",
+    "demo:mock": "MOCK_MODE=true pnpm --filter @prism/api dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}

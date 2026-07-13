@@ -1,0 +1,17 @@
+{
+  "version": "appetite.v1",
+  "occupationClassesInAppetite": [
+    "management_consultant",
+    "it_consultant",
+    "accountant",
+    "bookkeeper",
+    "marketing_media",
+    "training_education"
+  ],
+  "maxAnnualFeeIncome": 5000000,
+  "referAnnualFeeIncomeFrom": 3000000,
+  "maxUsCanadaPct": 10,
+  "maxClaimsIn5Years": 2,
+  "maxSingleClaimAmount": 100000,
+  "insolvencyLookbackYears": 5
+}
