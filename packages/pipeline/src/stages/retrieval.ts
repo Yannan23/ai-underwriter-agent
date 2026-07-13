@@ -1,23 +1,27 @@
 import { GuidelineContext } from '@prism/contracts'
 
 import guidelineFixture from '../../../../fixtures/guideline-context.json'
+import { retrieveGuidelines } from '../corpus/retrieve'
 import { knockedOut, type PipelineStage } from '../state'
 
 /**
- * Stage 4 (RAG). Mock mode returns a fixed mini-corpus context; the real
- * implementation (Voyage embeddings + in-memory cosine on Day 1, pgvector
- * later) lands in build-plan block ⑥. Skipped after a knockout.
+ * Stage 4 (RAG). Mock mode returns a fixed mini-corpus context. Real mode
+ * embeds the authored guideline corpus with Voyage once per process, builds a
+ * deterministic query from the extracted application, and ranks chunks with
+ * in-memory cosine top-6 (pgvector + rerank is Day 2+). Skipped after a
+ * knockout.
  */
 export const retrievalStage: PipelineStage = {
   name: 'retrieval',
   skipIf: knockedOut,
   async run(state, ctx) {
-    if (!ctx.mockMode) {
-      throw new Error(
-        'real guideline retrieval not implemented yet (build-plan block ⑥) — run with MOCK_MODE=true'
-      )
+    if (ctx.mockMode) {
+      return { ...state, guidelines: GuidelineContext.parse(guidelineFixture) }
+    }
+    if (!state.extraction) {
+      throw new Error('retrieval requires extraction output')
     }
 
-    return { ...state, guidelines: GuidelineContext.parse(guidelineFixture) }
+    return { ...state, guidelines: await retrieveGuidelines(state.extraction) }
   },
 }

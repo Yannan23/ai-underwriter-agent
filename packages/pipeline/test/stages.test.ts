@@ -365,10 +365,10 @@ describe('extraction stage', () => {
 describe('retrieval, risk, and decision stage guards', () => {
   const state: PipelineState = { submission: { source: 'form', form: {} } }
 
-  test('retrieval throws outside mock mode', async () => {
+  test('retrieval requires extraction output outside mock mode', async () => {
     await expect(
       retrievalStage.run(state, mockCtx([], { mockMode: false }))
-    ).rejects.toThrow('MOCK_MODE=true')
+    ).rejects.toThrow('retrieval requires extraction output')
   })
 
   test('risk throws outside mock mode', async () => {
