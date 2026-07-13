@@ -24,7 +24,6 @@ import {
   type Stage,
   type StageContext,
 } from '../src/index'
-import { decisionStage } from '../src/stages/decision'
 import { eligibilityStage } from '../src/stages/eligibility'
 import { extractionStage } from '../src/stages/extraction'
 import { pricingStage } from '../src/stages/pricing'
@@ -362,7 +361,7 @@ describe('extraction stage', () => {
   })
 })
 
-describe('retrieval, risk, and decision stage guards', () => {
+describe('retrieval and risk stage guards', () => {
   const state: PipelineState = { submission: { source: 'form', form: {} } }
 
   test('retrieval throws outside mock mode', async () => {
@@ -371,22 +370,12 @@ describe('retrieval, risk, and decision stage guards', () => {
     ).rejects.toThrow('MOCK_MODE=true')
   })
 
-  test('risk throws outside mock mode', async () => {
-    await expect(
-      riskStage.run(state, mockCtx([], { mockMode: false }))
-    ).rejects.toThrow('MOCK_MODE=true')
-  })
-
+  // The real risk/decision paths (build-plan block ⑦) are covered with an
+  // injected fake client in risk-decision.test.ts.
   test('risk requires retrieved guidelines', async () => {
     await expect(riskStage.run(state, mockCtx())).rejects.toThrow(
       'risk assessment requires retrieved guidelines'
     )
-  })
-
-  test('decision throws outside mock mode', async () => {
-    await expect(
-      decisionStage.run(state, mockCtx([], { mockMode: false }))
-    ).rejects.toThrow('MOCK_MODE=true')
   })
 })
 
