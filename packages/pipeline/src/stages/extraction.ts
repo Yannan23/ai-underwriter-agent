@@ -7,6 +7,8 @@ import {
 import extractedFixture from '../../../../fixtures/extracted-application.json'
 import { type PipelineStage } from '../state'
 
+import { extractApplication } from './extraction-llm'
+
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined
 }
@@ -46,15 +48,16 @@ export function classifyOccupationMock(occupation: string): OccupationClass {
 /**
  * Stage 1 (LLM: Haiku). Mock mode merges the typed fixture with whatever the
  * form actually said, so the demo responds to real input without a model call.
- * The real Haiku implementation lands in build-plan block ④.
+ * Real mode runs two structured Haiku calls with injection defenses and
+ * composite per-field confidence — see ./extraction-llm.
  */
 export const extractionStage: PipelineStage = {
   name: 'extraction',
   async run(state, ctx) {
     if (!ctx.mockMode) {
-      throw new Error(
-        'real Haiku extraction not implemented yet (build-plan block ④) — run with MOCK_MODE=true'
-      )
+      const extraction = await extractApplication(state.submission.form)
+
+      return { ...state, extraction }
     }
     const form = state.submission.form
     const base = ExtractedApplication.parse(extractedFixture)

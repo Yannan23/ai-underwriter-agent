@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import { rating } from '@prism/config'
 import {
   DecisionRecommendation,
@@ -19,6 +20,7 @@ import {
   ratePremium,
   routeApplication,
   runPipeline,
+  setAnthropicClientForTests,
   StageFailure,
   type PipelineState,
   type Stage,
@@ -290,12 +292,21 @@ describe('occupation classifier mock', () => {
 })
 
 describe('extraction stage', () => {
-  test('throws outside mock mode', async () => {
-    const state: PipelineState = { submission: { source: 'form', form: {} } }
+  test('takes the real Haiku path outside mock mode', async () => {
+    // Inject a failing fake client: proves the stage routes to the LLM path
+    // (and propagates its errors) without any network in unit tests.
+    setAnthropicClientForTests({
+      messages: { parse: () => Promise.reject(new Error('offline')) },
+    } as unknown as Anthropic)
+    try {
+      const state: PipelineState = { submission: { source: 'form', form: {} } }
 
-    await expect(
-      extractionStage.run(state, mockCtx([], { mockMode: false }))
-    ).rejects.toThrow('MOCK_MODE=true')
+      await expect(
+        extractionStage.run(state, mockCtx([], { mockMode: false }))
+      ).rejects.toThrow('[extraction] model call failed')
+    } finally {
+      setAnthropicClientForTests(undefined)
+    }
   })
 
   test('merges valid form values over the fixture base', async () => {
