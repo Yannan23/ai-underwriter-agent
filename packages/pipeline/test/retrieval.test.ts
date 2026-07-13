@@ -243,7 +243,7 @@ describe('voyage embeddings client', () => {
     await expect(promise).rejects.toThrow('failed schema validation')
   })
 
-  test('retries a 429 with backoff, then succeeds', async () => {
+  test('retries a 429 with a rate-limit-window backoff, then succeeds', async () => {
     vi.useFakeTimers()
     const mock = vi
       .fn()
@@ -253,7 +253,31 @@ describe('voyage embeddings client', () => {
     vi.stubGlobal('fetch', mock)
     const pending = embedTexts(['a'], 'test')
 
-    await vi.advanceTimersByTimeAsync(1000)
+    // 429 without Retry-After waits 20s × attempt (per-minute rate windows).
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(mock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+
+    await expect(pending).resolves.toEqual([[1]])
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  test('honours the Retry-After header on 429', async () => {
+    vi.useFakeTimers()
+    const mock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('slow down', {
+          status: 429,
+          headers: { 'retry-after': '2' },
+        })
+      )
+      .mockResolvedValueOnce(embeddingsResponse([[1]]))
+
+    vi.stubGlobal('fetch', mock)
+    const pending = embedTexts(['a'], 'test')
+
+    await vi.advanceTimersByTimeAsync(2000)
 
     await expect(pending).resolves.toEqual([[1]])
     expect(mock).toHaveBeenCalledTimes(2)
@@ -271,10 +295,10 @@ describe('voyage embeddings client', () => {
     // Attach a handler before advancing timers to avoid unhandled-rejection noise.
     // eslint-disable-next-line promise/prefer-await-to-then
     void pending.catch(() => undefined)
-    await vi.advanceTimersByTimeAsync(6000)
+    await vi.advanceTimersByTimeAsync(22_000)
 
-    await expect(pending).rejects.toThrow('failed after 3 attempts')
-    expect(mock).toHaveBeenCalledTimes(3)
+    await expect(pending).rejects.toThrow('failed after 4 attempts')
+    expect(mock).toHaveBeenCalledTimes(4)
   })
 })
 

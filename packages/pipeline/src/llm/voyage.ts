@@ -26,8 +26,31 @@ export class EmbeddingCallError extends Error {
   }
 }
 
-const MAX_ATTEMPTS = 3
-const backoffMs = (attempt: number): number => 1000 * 4 ** (attempt - 1)
+const MAX_ATTEMPTS = 4
+
+/**
+ * 429s honour Retry-After when present and otherwise back off in long steps —
+ * Voyage rate limits are per-minute windows, so the short 5xx backoff would
+ * burn every retry inside the same window and still fail.
+ */
+const backoffMs = (
+  attempt: number,
+  status: number,
+  retryAfter: string | null
+): number => {
+  const retryAfterSeconds = Number(retryAfter)
+
+  if (
+    retryAfter !== null &&
+    Number.isFinite(retryAfterSeconds) &&
+    retryAfterSeconds > 0
+  ) {
+    return Math.min(retryAfterSeconds * 1000, 60_000)
+  }
+  if (status === 429) return 20_000 * attempt
+
+  return 1000 * 4 ** (attempt - 1)
+}
 
 /**
  * Embeds a batch of texts via the Voyage REST API (fetch-based — the payload
@@ -81,7 +104,16 @@ export async function embedTexts(
     if (response.status !== 429 && response.status < 500) throw failure
     lastError = failure
     if (attempt < MAX_ATTEMPTS) {
-      await new Promise((resolve) => setTimeout(resolve, backoffMs(attempt)))
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          backoffMs(
+            attempt,
+            response.status,
+            response.headers.get('retry-after')
+          )
+        )
+      )
     }
   }
   throw new EmbeddingCallError(label, `failed after ${MAX_ATTEMPTS} attempts`, {
