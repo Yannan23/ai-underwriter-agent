@@ -341,6 +341,23 @@
         margin-top: 14px;
         font-size: 14px;
       }
+      .cta-row {
+        margin-top: 22px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+      a.btn {
+        text-decoration: none;
+      }
+      .cta-note {
+        font-size: 14px;
+        color: var(--body);
+      }
+      .cta-note strong {
+        color: var(--ink);
+      }
       .factors {
         margin-top: 24px;
       }
@@ -592,6 +609,27 @@
         currency: 'AUD',
       })
       let es = null
+      let currentApplicationId = null
+
+      const UNDERWRITING_EMAIL = 'underwriting@prismunderwriting.au'
+
+      function referenceNumber() {
+        return currentApplicationId
+          ? 'PI-' + currentApplicationId.slice(0, 8).toUpperCase()
+          : 'PI-PENDING'
+      }
+
+      function contactCta(context) {
+        const ref = referenceNumber()
+        const subject = encodeURIComponent(`${ref} — ${context}`)
+        const body = encodeURIComponent(
+          `Hi,\n\nMy application ${ref} was ${context.toLowerCase()}. I'd like to discuss it with an underwriter.\n\nThanks`
+        )
+        return `<div class="cta-row">
+          <a class="btn" href="mailto:${UNDERWRITING_EMAIL}?subject=${subject}&body=${body}">Talk to an underwriter →</a>
+          <span class="cta-note">Ref <strong>${ref}</strong> · a PI specialist replies within 1 business day</span>
+        </div>`
+      }
 
       function renderStages() {
         stagesEl.innerHTML = STAGES.map(
@@ -648,7 +686,8 @@
           resultEl.innerHTML = `<h2>We need a little more.</h2>
       <div class="pink-box"><h3>Request for information.</h3>
       <ul>${r.rfi.items.map((i) => `<li>${i.message}</li>`).join('')}</ul>
-      <p class="note">The pipeline is paused — it resumes from this stage when the broker responds.</p></div>`
+      <p class="note">The pipeline is paused — it resumes from this stage when the broker responds.</p>
+      ${contactCta('Paused — more information requested')}</div>`
         } else if (route === 'auto_approve' && r.quote) {
           const b = r.quote.premiumBreakdown
           resultEl.innerHTML = `<h2>Approved. Here's the quote.</h2>
@@ -671,7 +710,8 @@
           resultEl.innerHTML = `<h2>Referred to an underwriter.</h2>
       <div class="pink-box"><h3>${route === 'refer_senior' ? 'Senior referral.' : 'Referral.'}</h3>
       <ul>${reasons.map((x) => `<li>${x}</li>`).join('')}</ul>
-      <p class="note">Auto-approve exists; auto-decline does not — adverse decisions always require human accountability.</p></div>
+      <p class="note">Auto-approve exists; auto-decline does not — adverse decisions always require human accountability.</p>
+      ${contactCta('Referred for underwriter review')}</div>
       ${r.riskAssessment ? '<div class="card"><h3>Pre-analysis for the underwriter.</h3>' + factorsHtml(r.riskAssessment, r.citationCheck) + '</div>' : ''}`
         }
         document.getElementById('result-section').style.display = 'block'
@@ -702,6 +742,7 @@
               body: JSON.stringify({ source: 'form', form }),
             })
             const { applicationId } = await res.json()
+            currentApplicationId = applicationId
             es = new EventSource('/applications/' + applicationId + '/stream')
             es.addEventListener('stage', (e) =>
               onStageEvent(JSON.parse(e.data))

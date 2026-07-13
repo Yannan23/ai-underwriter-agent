@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
-import { type z } from 'zod'
+// Match @anthropic-ai/sdk/helpers/zod (imports zod/v4). Using `zod` here can
+// resolve to a different ZodType identity under some TS module graphs.
+import type * as z from 'zod/v4'
 
 /**
  * Model routing (PRD §5): Haiku for extraction/classification, Sonnet for
