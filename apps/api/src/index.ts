@@ -1,5 +1,3 @@
-import './env'
-
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
@@ -8,10 +6,10 @@ import { RawSubmission } from '@prism/contracts'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 
+import { mockMode } from './env'
 import { startPipeline } from './run'
 import { applications, createApplication, subscribe } from './store'
 
-const mockMode = process.env.MOCK_MODE === 'true'
 const app = new Hono()
 
 app.get('/', (c) =>

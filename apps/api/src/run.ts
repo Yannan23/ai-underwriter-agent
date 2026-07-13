@@ -8,9 +8,9 @@ import {
   type StageContext,
 } from '@prism/pipeline'
 
+import { mockMode } from './env'
 import { appendEvent, finish, type ApplicationRecord } from './store'
 
-const mockMode = process.env.MOCK_MODE === 'true'
 // Mock stages are instant; a small pause per stage lets the demo progress view animate.
 const stageDelayMs = Number(process.env.STAGE_DELAY_MS ?? (mockMode ? 350 : 0))
 
