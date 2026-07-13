@@ -1,4 +1,4 @@
-import type { StageEvent, StageName } from '@prism/contracts'
+import { type StageEvent, type StageName } from '@prism/contracts'
 
 export interface StageContext {
   applicationId: string

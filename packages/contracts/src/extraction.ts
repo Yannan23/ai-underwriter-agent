@@ -1,4 +1,5 @@
 import { z } from 'zod'
+
 import { AuState, OccupationClass } from './common'
 
 /** Stage 1 output (LLM: Haiku). Extraction only — the prompt forbids judgment or interpretation. */
@@ -16,10 +17,15 @@ export const ExtractedApplication = z.object({
     /** Free text as written on the form; classified into occupationClass by a second Haiku call. */
     occupation: z.string(),
     occupationClass: OccupationClass.nullable(),
-    activitiesSplit: z.array(z.object({ activity: z.string(), pct: z.number() })),
+    activitiesSplit: z.array(
+      z.object({ activity: z.string(), pct: z.number() })
+    ),
     annualFeeIncome: z.number().nullable(),
     staffCount: z.number().nullable(),
-    overseasExposure: z.object({ usCanadaPct: z.number(), otherPct: z.number() }),
+    overseasExposure: z.object({
+      usCanadaPct: z.number(),
+      otherPct: z.number(),
+    }),
   }),
   cover: z.object({
     /** Limit of indemnity requested. */
@@ -35,7 +41,7 @@ export const ExtractedApplication = z.object({
         description: z.string(),
         amount: z.number().nullable(),
         open: z.boolean(),
-      }),
+      })
     ),
     priorInsurance: z.boolean().nullable(),
     everDeclinedOrCancelled: z.boolean().nullable(),

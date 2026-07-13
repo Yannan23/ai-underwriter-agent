@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import type { RfiRequest } from '@prism/contracts'
-import { createStages, runPipeline, type PipelineState, type StageContext } from '@prism/pipeline'
+
+import { type RfiRequest } from '@prism/contracts'
+import {
+  createStages,
+  runPipeline,
+  type PipelineState,
+  type StageContext,
+} from '@prism/pipeline'
+
 import { appendEvent, finish, type ApplicationRecord } from './store'
 
 const mockMode = process.env.MOCK_MODE === 'true'
@@ -19,31 +26,37 @@ export function startPipeline(record: ApplicationRecord): void {
   }
   const input: PipelineState = { submission: record.submission }
 
-  void runPipeline(createStages(), input, ctx)
-    .then((run) => {
+  void (async () => {
+    try {
+      const run = await runPipeline(createStages(), input, ctx)
       const state = run.state as PipelineState
+
       if (run.halted) {
         finish(record, {
           status: 'awaiting_info',
           rfi: run.halted.detail.rfi as RfiRequest | undefined,
           eligibility: state.eligibility,
         })
+
         return
       }
       finish(record, {
-        status: state.routing?.route === 'auto_approve' ? 'auto_approved' : 'referred',
+        status:
+          state.routing?.route === 'auto_approve'
+            ? 'auto_approved'
+            : 'referred',
         routing: state.routing,
         quote: state.quote,
         riskAssessment: state.risk,
         citationCheck: state.citationCheck,
         eligibility: state.eligibility,
       })
-    })
-    .catch((err: unknown) => {
+    } catch (err) {
       // A failed stage parks the application for human pickup — never silently skipped.
       finish(record, {
         status: record.status,
         error: err instanceof Error ? err.message : String(err),
       })
-    })
+    }
+  })()
 }

@@ -1,11 +1,12 @@
-import type { StageName } from '@prism/contracts'
-import type { Stage, StageContext } from './stage'
+import { type StageName } from '@prism/contracts'
+
+import { type Stage, type StageContext } from './stage'
 
 /** Thrown by a stage to pause the pipeline (e.g. RFI) — not a failure. */
 export class PipelineHalt extends Error {
   constructor(
     readonly reason: 'awaiting_info',
-    readonly detail: Record<string, unknown>,
+    readonly detail: Record<string, unknown>
   ) {
     super(`pipeline halted: ${reason}`)
   }
@@ -14,7 +15,7 @@ export class PipelineHalt extends Error {
 export class StageFailure extends Error {
   constructor(
     readonly stage: string,
-    override readonly cause: unknown,
+    override readonly cause: unknown
   ) {
     super(`stage ${stage} failed`)
   }
@@ -34,11 +35,12 @@ export interface PipelineRunResult {
  */
 export async function runPipeline(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  stages: ReadonlyArray<Stage<any, any>>,
+  stages: readonly Stage<any, any>[],
   initialInput: unknown,
-  ctx: StageContext,
+  ctx: StageContext
 ): Promise<PipelineRunResult> {
   let input: unknown = initialInput
+
   for (const stage of stages) {
     if (stage.skipIf?.(input)) {
       ctx.emit({
@@ -49,11 +51,20 @@ export async function runPipeline(
       })
       continue
     }
-    ctx.emit({ applicationId: ctx.applicationId, stage: stage.name, status: 'started' })
-    if (ctx.stageDelayMs) await new Promise((r) => setTimeout(r, ctx.stageDelayMs))
+    ctx.emit({
+      applicationId: ctx.applicationId,
+      stage: stage.name,
+      status: 'started',
+    })
+    if (ctx.stageDelayMs)
+      await new Promise((resolve) => setTimeout(resolve, ctx.stageDelayMs))
     try {
       input = await stage.run(input, ctx)
-      ctx.emit({ applicationId: ctx.applicationId, stage: stage.name, status: 'completed' })
+      ctx.emit({
+        applicationId: ctx.applicationId,
+        stage: stage.name,
+        status: 'completed',
+      })
     } catch (cause) {
       if (cause instanceof PipelineHalt) {
         ctx.emit({
@@ -62,16 +73,27 @@ export async function runPipeline(
           status: 'paused',
           detail: cause.detail,
         })
-        return { state: input, halted: { stage: stage.name, reason: cause.reason, detail: cause.detail } }
+
+        return {
+          state: input,
+          halted: {
+            stage: stage.name,
+            reason: cause.reason,
+            detail: cause.detail,
+          },
+        }
       }
       ctx.emit({
         applicationId: ctx.applicationId,
         stage: stage.name,
         status: 'failed',
-        detail: { message: cause instanceof Error ? cause.message : String(cause) },
+        detail: {
+          message: cause instanceof Error ? cause.message : String(cause),
+        },
       })
       throw new StageFailure(stage.name, cause)
     }
   }
+
   return { state: input }
 }

@@ -1,17 +1,18 @@
-import type {
-  CitationCheck,
-  DecisionRecommendation,
-  EligibilityResult,
-  ExtractedApplication,
-  GuidelineContext,
-  IntakeRecord,
-  Quote,
-  RawSubmission,
-  RiskAssessment,
-  RoutingResult,
-  ValidationResult,
+import {
+  type CitationCheck,
+  type DecisionRecommendation,
+  type EligibilityResult,
+  type ExtractedApplication,
+  type GuidelineContext,
+  type IntakeRecord,
+  type Quote,
+  type RawSubmission,
+  type RiskAssessment,
+  type RoutingResult,
+  type ValidationResult,
 } from '@prism/contracts'
-import type { Stage } from './stage'
+
+import { type Stage } from './stage'
 
 /**
  * Accumulating pipeline state: each stage reads what it needs from earlier

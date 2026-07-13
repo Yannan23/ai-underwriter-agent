@@ -16,7 +16,16 @@ export const OCCUPATION_CLASSES = [
 export const OccupationClass = z.enum(OCCUPATION_CLASSES)
 export type OccupationClass = z.infer<typeof OccupationClass>
 
-export const AU_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'] as const
+export const AU_STATES = [
+  'NSW',
+  'VIC',
+  'QLD',
+  'WA',
+  'SA',
+  'TAS',
+  'ACT',
+  'NT',
+] as const
 export const AuState = z.enum(AU_STATES)
 export type AuState = z.infer<typeof AuState>
 

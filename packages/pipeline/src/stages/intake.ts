@@ -1,5 +1,6 @@
 import { IntakeRecord } from '@prism/contracts'
-import type { PipelineStage } from '../state'
+
+import { type PipelineStage } from '../state'
 
 export const intakeStage: PipelineStage = {
   name: 'intake',
@@ -10,6 +11,7 @@ export const intakeStage: PipelineStage = {
       documentRefs: [],
       receivedAt: new Date().toISOString(),
     })
+
     return { ...state, intake }
   },
 }

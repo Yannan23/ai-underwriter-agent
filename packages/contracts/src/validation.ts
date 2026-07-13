@@ -1,4 +1,5 @@
 import { z } from 'zod'
+
 import { ExtractedApplication } from './extraction'
 
 export const ValidationIssue = z.object({

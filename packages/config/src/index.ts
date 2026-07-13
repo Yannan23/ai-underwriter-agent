@@ -1,4 +1,5 @@
 import { AppetiteConfig, RatingConfig } from '@prism/contracts'
+
 import appetiteV1 from './appetite.v1.json'
 import ratingV1 from './rating.v1.json'
 

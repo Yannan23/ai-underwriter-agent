@@ -1,4 +1,5 @@
 import { GuidelineContext } from '@prism/contracts'
+
 import guidelineFixture from '../../../../fixtures/guideline-context.json'
 import { knockedOut, type PipelineStage } from '../state'
 
@@ -12,8 +13,11 @@ export const retrievalStage: PipelineStage = {
   skipIf: knockedOut,
   async run(state, ctx) {
     if (!ctx.mockMode) {
-      throw new Error('real guideline retrieval not implemented yet (build-plan block ⑥) — run with MOCK_MODE=true')
+      throw new Error(
+        'real guideline retrieval not implemented yet (build-plan block ⑥) — run with MOCK_MODE=true'
+      )
     }
+
     return { ...state, guidelines: GuidelineContext.parse(guidelineFixture) }
   },
 }

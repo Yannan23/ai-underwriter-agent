@@ -1,0 +1,27 @@
+version: '0.2'
+language: en
+dictionaries:
+  - typescript
+  - node
+  - npm
+  - softwareTerms
+words:
+  - commitlint
+  - hono
+  - lookback
+  - normalises
+  - nvmrc
+  - pgvector
+  - prism
+  - rerank
+  - resumability
+  - SOLV
+  - supabase
+  - tsconfigs
+  - tsx
+  - underwriter
+  - vitest
+ignorePaths:
+  - node_modules
+  - pnpm-lock.yaml
+  - coverage

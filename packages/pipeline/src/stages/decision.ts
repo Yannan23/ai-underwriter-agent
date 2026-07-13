@@ -1,4 +1,5 @@
 import { DecisionRecommendation } from '@prism/contracts'
+
 import decisionFixture from '../../../../fixtures/decision-recommendation.json'
 import { knockedOut, type PipelineStage } from '../state'
 
@@ -12,8 +13,14 @@ export const decisionStage: PipelineStage = {
   skipIf: knockedOut,
   async run(state, ctx) {
     if (!ctx.mockMode) {
-      throw new Error('real Sonnet decision reasoning not implemented yet (build-plan block ⑦) — run with MOCK_MODE=true')
+      throw new Error(
+        'real Sonnet decision reasoning not implemented yet (build-plan block ⑦) — run with MOCK_MODE=true'
+      )
     }
-    return { ...state, recommendation: DecisionRecommendation.parse(decisionFixture) }
+
+    return {
+      ...state,
+      recommendation: DecisionRecommendation.parse(decisionFixture),
+    }
   },
 }

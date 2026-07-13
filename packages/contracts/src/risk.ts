@@ -11,12 +11,12 @@ export const RiskAssessment = z.object({
       severity: z.enum(['low', 'medium', 'high']),
       citations: z.array(z.string()).min(1),
       rationale: z.string(),
-    }),
+    })
   ),
   overallRiskTier: z.enum(['low', 'medium', 'high']),
   uncoveredFactors: z.array(z.string()),
   suggestedConditions: z.array(
-    z.object({ condition: z.string(), citations: z.array(z.string()) }),
+    z.object({ condition: z.string(), citations: z.array(z.string()) })
   ),
 })
 export type RiskAssessment = z.infer<typeof RiskAssessment>

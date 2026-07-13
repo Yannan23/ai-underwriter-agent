@@ -22,32 +22,32 @@ PI underwriting today is a manual, multi-day process: a broker emails a proposal
 
 The pipeline mirrors how a human PI underwriter actually works. Each stage is independently testable, observable, and auditable.
 
-| # | Stage | Executor |
-|---|-------|----------|
-| 0 | Intake & ingestion (PDF / web form) | Deterministic |
-| 1 | Extraction → typed schema with per-field confidence | LLM — Claude Haiku |
-| 2 | Validation & Request-for-Information loop | Deterministic (Zod) |
-| 3 | Eligibility / knockout rules (versioned appetite config) | Deterministic rules engine |
-| 4 | Guideline retrieval (RAG) | Voyage embeddings + pgvector + rerank |
-| 5 | Risk assessment, citation-enforced | LLM — Claude Sonnet |
-| 6 | Decision reasoning → deterministic decision engine | LLM recommends, code decides |
-| 7 | Pricing & quote generation (versioned rating tables) | Deterministic rating engine |
-| 8 | Human-in-the-loop routing & review console | Deterministic routing + human |
+| #   | Stage                                                    | Executor                              |
+| --- | -------------------------------------------------------- | ------------------------------------- |
+| 0   | Intake & ingestion (PDF / web form)                      | Deterministic                         |
+| 1   | Extraction → typed schema with per-field confidence      | LLM — Claude Haiku                    |
+| 2   | Validation & Request-for-Information loop                | Deterministic (Zod)                   |
+| 3   | Eligibility / knockout rules (versioned appetite config) | Deterministic rules engine            |
+| 4   | Guideline retrieval (RAG)                                | Voyage embeddings + pgvector + rerank |
+| 5   | Risk assessment, citation-enforced                       | LLM — Claude Sonnet                   |
+| 6   | Decision reasoning → deterministic decision engine       | LLM recommends, code decides          |
+| 7   | Pricing & quote generation (versioned rating tables)     | Deterministic rating engine           |
+| 8   | Human-in-the-loop routing & review console               | Deterministic routing + human         |
 
 **Model routing:** lightweight extraction and classification run on Claude Haiku; multi-step reasoning runs on Claude Sonnet — cutting per-application token cost roughly in half versus a Sonnet-only baseline, with eval-verified accuracy parity.
 
 ## Stack
 
-| Layer | Technology |
-|---|---|
-| Runtime | TypeScript · Hono · Docker |
-| Models | Anthropic Claude (Haiku / Sonnet) via structured outputs |
-| Retrieval | Voyage embeddings + reranking · Supabase pgvector |
-| Data | Supabase (PostgreSQL · pgvector · object storage) |
-| Contracts | Zod schemas at every stage boundary |
+| Layer     | Technology                                               |
+| --------- | -------------------------------------------------------- |
+| Runtime   | TypeScript · Hono · Docker                               |
+| Models    | Anthropic Claude (Haiku / Sonnet) via structured outputs |
+| Retrieval | Voyage embeddings + reranking · Supabase pgvector        |
+| Data      | Supabase (PostgreSQL · pgvector · object storage)        |
+| Contracts | Zod schemas at every stage boundary                      |
 | Streaming | SSE (applicant progress) · NDJSON (underwriting console) |
-| Evals | Promptfoo + curated golden dataset, gating CI releases |
-| CI/CD | GitHub Actions |
+| Evals     | Promptfoo + curated golden dataset, gating CI releases   |
+| CI/CD     | GitHub Actions                                           |
 
 ## Quality gates
 

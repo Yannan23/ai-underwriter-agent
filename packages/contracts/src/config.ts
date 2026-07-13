@@ -1,4 +1,5 @@
 import { z } from 'zod'
+
 import { OccupationClass } from './common'
 
 /** Shape of appetite.v1.json — versioned knockout/referral thresholds (PRD §6 Stage 3). */
@@ -21,7 +22,9 @@ export const RatingConfig = z.object({
   /** Base rate per occupation class (premium per $1M fee income, illustrative). */
   baseRate: z.record(z.number()),
   /** Ascending bands; upTo=null means open-ended top band. */
-  revenueBands: z.array(z.object({ upTo: z.number().nullable(), factor: z.number() })),
+  revenueBands: z.array(
+    z.object({ upTo: z.number().nullable(), factor: z.number() })
+  ),
   /** Increased limit factor table, ascending by limit. */
   ilf: z.array(z.object({ limit: z.number(), factor: z.number() })),
   claimsLoadingPerClaim: z.number(),

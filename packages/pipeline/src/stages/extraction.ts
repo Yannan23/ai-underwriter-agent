@@ -1,6 +1,11 @@
-import { AU_STATES, ExtractedApplication, OCCUPATION_CLASSES, type OccupationClass } from '@prism/contracts'
+import {
+  AU_STATES,
+  ExtractedApplication,
+  type OccupationClass,
+} from '@prism/contracts'
+
 import extractedFixture from '../../../../fixtures/extracted-application.json'
-import type { PipelineState, PipelineStage } from '../state'
+import { type PipelineStage } from '../state'
 
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined
@@ -8,7 +13,9 @@ function asString(v: unknown): string | undefined {
 
 function asNumber(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)))
+    return Number(v)
+
   return undefined
 }
 
@@ -19,7 +26,7 @@ function asNumber(v: unknown): number | undefined {
  */
 export function classifyOccupationMock(occupation: string): OccupationClass {
   const t = occupation.toLowerCase()
-  const rules: Array<[RegExp, OccupationClass]> = [
+  const rules: [RegExp, OccupationClass][] = [
     [/software|\bit\b|developer|tech/, 'it_consultant'],
     [/account/, 'accountant'],
     [/bookkeep/, 'bookkeeper'],
@@ -30,7 +37,9 @@ export function classifyOccupationMock(occupation: string): OccupationClass {
     [/real estate|property agent/, 'real_estate_agent'],
     [/health|physio|osteo|dietit/, 'allied_health'],
   ]
+
   for (const [re, cls] of rules) if (re.test(t)) return cls
+
   return 'management_consultant'
 }
 
@@ -43,7 +52,9 @@ export const extractionStage: PipelineStage = {
   name: 'extraction',
   async run(state, ctx) {
     if (!ctx.mockMode) {
-      throw new Error('real Haiku extraction not implemented yet (build-plan block ④) — run with MOCK_MODE=true')
+      throw new Error(
+        'real Haiku extraction not implemented yet (build-plan block ④) — run with MOCK_MODE=true'
+      )
     }
     const form = state.submission.form
     const base = ExtractedApplication.parse(extractedFixture)
@@ -62,23 +73,29 @@ export const extractionStage: PipelineStage = {
         state: AU_STATES.includes(stateCode as (typeof AU_STATES)[number])
           ? stateCode
           : base.insured.state,
-        yearsInPractice: asNumber(form.yearsInPractice) ?? base.insured.yearsInPractice,
+        yearsInPractice:
+          asNumber(form.yearsInPractice) ?? base.insured.yearsInPractice,
       },
       business: {
         ...base.business,
         occupation,
         occupationClass: classifyOccupationMock(occupation),
-        annualFeeIncome: asNumber(form.annualFeeIncome) ?? base.business.annualFeeIncome,
+        annualFeeIncome:
+          asNumber(form.annualFeeIncome) ?? base.business.annualFeeIncome,
         staffCount: asNumber(form.staffCount) ?? base.business.staffCount,
         overseasExposure: {
           ...base.business.overseasExposure,
-          usCanadaPct: asNumber(form.usCanadaPct) ?? base.business.overseasExposure.usCanadaPct,
+          usCanadaPct:
+            asNumber(form.usCanadaPct) ??
+            base.business.overseasExposure.usCanadaPct,
         },
       },
       cover: {
         ...base.cover,
-        limitRequested: asNumber(form.limitRequested) ?? base.cover.limitRequested,
-        excessPreference: asNumber(form.excessPreference) ?? base.cover.excessPreference,
+        limitRequested:
+          asNumber(form.limitRequested) ?? base.cover.limitRequested,
+        excessPreference:
+          asNumber(form.excessPreference) ?? base.cover.excessPreference,
       },
       history: {
         ...base.history,
@@ -93,6 +110,7 @@ export const extractionStage: PipelineStage = {
             : base.history.claimsLast5Years,
       },
     })
+
     return { ...state, extraction }
   },
 }

@@ -6,7 +6,12 @@ import { z } from 'zod'
  * authority matrix. The LLM cannot unilaterally accept or decline.
  */
 export const DecisionRecommendation = z.object({
-  recommendation: z.enum(['accept', 'accept_with_conditions', 'refer', 'decline']),
+  recommendation: z.enum([
+    'accept',
+    'accept_with_conditions',
+    'refer',
+    'decline',
+  ]),
   conditions: z.array(z.string()),
   reasoning: z.string(),
   citations: z.array(z.string()),
