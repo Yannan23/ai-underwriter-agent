@@ -1,0 +1,27 @@
+{
+  "riskFactors": [
+    {
+      "factor": "Core-appetite management consultancy",
+      "severity": "low",
+      "citations": ["gl-v1-001"],
+      "rationale": "Strategy and operational advisory mix falls squarely within stated appetite for management consultants, with fee income well under the cap."
+    },
+    {
+      "factor": "Clean five-year claims history",
+      "severity": "low",
+      "citations": ["gl-v1-002"],
+      "rationale": "No claims notified in the past five years qualifies the risk for standard terms without loading."
+    },
+    {
+      "factor": "Minor non-US overseas exposure",
+      "severity": "low",
+      "citations": ["gl-v1-003"],
+      "rationale": "Overseas revenue is small and outside US/Canada, within acceptable exposure guidance."
+    }
+  ],
+  "overallRiskTier": "low",
+  "uncoveredFactors": [
+    "Use of written engagement letters is not stated on the proposal form"
+  ],
+  "suggestedConditions": []
+}

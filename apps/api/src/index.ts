@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { serve } from '@hono/node-server'
 import { RawSubmission } from '@prism/contracts'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import { appendEvent, applications } from './store'
+import { startPipeline } from './run'
+import { applications, createApplication, subscribe } from './store'
 
 const mockMode = process.env.MOCK_MODE === 'true'
 const app = new Hono()
+
+app.get('/', (c) => c.html(readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8')))
 
 app.get('/health', (c) => c.json({ ok: true, mockMode }))
 
@@ -16,37 +20,58 @@ app.post('/applications', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'invalid submission', issues: parsed.error.flatten() }, 400)
   }
-  const id = randomUUID()
-  applications.set(id, {
-    id,
-    status: 'received',
-    submission: parsed.data,
-    events: [],
-    createdAt: new Date().toISOString(),
-  })
-  // Block ③ wires runPipeline() here (fire-and-forget; progress via /stream).
-  return c.json({ applicationId: id, status: 'received' }, 201)
+  const record = createApplication(randomUUID(), parsed.data)
+  startPipeline(record)
+  return c.json({ applicationId: record.id, status: record.status }, 201)
 })
 
 app.get('/applications/:id', (c) => {
   const record = applications.get(c.req.param('id'))
   if (!record) return c.json({ error: 'not found' }, 404)
-  return c.json({ id: record.id, status: record.status, events: record.events })
+  return c.json({ id: record.id, status: record.status, events: record.events, result: record.result ?? null })
 })
 
-// SSE: replays persisted events, then streams live ones. Until the pipeline is
-// wired (block ③), it replays whatever exists and announces itself.
+/**
+ * SSE progress stream: replays persisted events, then live-streams new ones;
+ * ends with a `result` event once the pipeline finishes (or is paused on RFI).
+ * record.events is the single source of truth — a cursor walks it in order and
+ * every write is awaited, so nothing is lost when the stream closes.
+ */
 app.get('/applications/:id/stream', (c) => {
   const record = applications.get(c.req.param('id'))
   if (!record) return c.json({ error: 'not found' }, 404)
+
   return streamSSE(c, async (stream) => {
-    for (const event of record.events) {
-      await stream.writeSSE({ event: 'stage', data: JSON.stringify(event), id: String(event.seq) })
-    }
-    await stream.writeSSE({
-      event: 'info',
-      data: JSON.stringify({ message: 'pipeline not wired yet — lands in build-plan block ③' }),
+    let aborted = false
+    let notify = () => {}
+    stream.onAbort(() => {
+      aborted = true
+      notify()
     })
+    const unsubscribe = subscribe(record.id, {
+      onEvent: () => notify(),
+      onDone: () => notify(),
+    })
+    try {
+      let cursor = 0
+      for (;;) {
+        // Arm the waiter before draining: anything appended mid-drain resolves it immediately.
+        const waiter = new Promise<void>((resolve) => {
+          notify = resolve
+        })
+        while (cursor < record.events.length && !aborted) {
+          const event = record.events[cursor++]
+          await stream.writeSSE({ event: 'stage', data: JSON.stringify(event), id: String(event?.seq) })
+        }
+        if (aborted || record.done) break
+        await waiter
+      }
+      if (!aborted && record.done) {
+        await stream.writeSSE({ event: 'result', data: JSON.stringify(record.result ?? { status: record.status }) })
+      }
+    } finally {
+      unsubscribe()
+    }
   })
 })
 
@@ -54,4 +79,4 @@ const port = Number(process.env.PORT ?? 3000)
 serve({ fetch: app.fetch, port })
 console.log(`prism api listening on :${port} (mockMode=${mockMode})`)
 
-export { app, appendEvent }
+export { app }

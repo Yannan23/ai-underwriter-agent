@@ -1,0 +1,41 @@
+{
+  "chunks": [
+    {
+      "id": "gl-v1-001",
+      "guidelineVersion": "pi-guidelines.v1",
+      "headingPath": ["Appetite", "Management consultants"],
+      "text": "Management consultancy risks with annual fee income under $5M are core appetite. Standard limit offerings are $1M and $2M. Strategy and operational advisory work is acceptable; engagements involving construction project management or financial product advice must be referred."
+    },
+    {
+      "id": "gl-v1-002",
+      "guidelineVersion": "pi-guidelines.v1",
+      "headingPath": ["Rating", "Claims history"],
+      "text": "Risks with no claims in the past five years qualify for standard terms. Each notified claim attracts a loading. Any open claim, or a single claim exceeding $100,000, is outside delegated authority and must be referred."
+    },
+    {
+      "id": "gl-v1-003",
+      "guidelineVersion": "pi-guidelines.v1",
+      "headingPath": ["Exposure", "Overseas work"],
+      "text": "US or Canadian derived revenue above 10% is outside appetite due to the litigation environment. Overseas exposure up to 10% in other common-law jurisdictions is acceptable at standard terms."
+    },
+    {
+      "id": "gl-v1-004",
+      "guidelineVersion": "pi-guidelines.v1",
+      "headingPath": ["Cover", "Retroactive date"],
+      "text": "Retroactive cover should align with continuous prior insurance. Unlimited retroactive cover may only be offered where five or more years of continuous insurance and a clean claims record are evidenced."
+    },
+    {
+      "id": "gl-v1-005",
+      "guidelineVersion": "pi-guidelines.v1",
+      "headingPath": ["Conditions", "Contract hygiene"],
+      "text": "Consultants using written engagement letters with liability caps qualify for the standard excess. Absence of written engagement terms warrants an increased excess or referral."
+    }
+  ],
+  "retrievalScores": {
+    "gl-v1-001": 0.91,
+    "gl-v1-002": 0.87,
+    "gl-v1-003": 0.82,
+    "gl-v1-004": 0.78,
+    "gl-v1-005": 0.74
+  }
+}

@@ -63,11 +63,21 @@ Every prompt, model, or guideline change runs the Promptfoo eval suite in CI. Re
 
 Structured JSON logging on every stage: request ID, model, latency, token usage, cost, confidence, and decision path — supporting debugging, cost tracking (Haiku vs Sonnet split), confidence-calibration analysis, and regulatory audit.
 
+## Quickstart
+
+```bash
+pnpm install
+pnpm demo:mock   # offline demo — all model calls replaced by typed fixtures
+# open http://localhost:3000, submit the form, watch the 9 stages stream live
+```
+
+Try `architect` as the occupation to see an eligibility knockout routed to a human — decided by the rules engine before a single model token is spent.
+
 ## Status
 
-🚧 **Pre-M0** — product spec complete, implementation starting. Roadmap (see [PRD §13](./prism-ai-underwriter-prd.md#13-milestones)):
+🚧 **M0 complete** — the 9-stage pipeline runs end-to-end in mock mode behind a live SSE demo UI; deterministic engines (eligibility, rating, routing, citation validation) are real. Real model calls land next. Roadmap (see [PRD §13](./prism-ai-underwriter-prd.md#13-milestones)):
 
-- **M0** — scaffold, Zod stage contracts, mock mode, CI
+- **M0** ✅ — scaffold, Zod stage contracts, mock mode, CI
 - **M1** — intake, extraction, validation/RFI, eligibility engine
 - **M2** — guideline corpus, RAG, citation-enforced risk assessment
 - **M3** — rating engine, quote generation, decision routing

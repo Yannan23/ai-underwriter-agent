@@ -5,6 +5,8 @@ export interface StageContext {
   requestId: string
   /** true → LLM stages return typed fixtures instead of calling models. */
   mockMode: boolean
+  /** Artificial pause before each stage (demo pacing in mock mode). */
+  stageDelayMs?: number
   emit: (event: Omit<StageEvent, 'seq' | 'at'>) => void
 }
 
@@ -14,5 +16,7 @@ export interface StageContext {
  */
 export interface Stage<I, O> {
   name: StageName
+  /** true → stage is recorded as skipped without running (e.g. LLM stages after a knockout). */
+  skipIf?: (input: I) => boolean
   run(input: I, ctx: StageContext): Promise<O>
 }
