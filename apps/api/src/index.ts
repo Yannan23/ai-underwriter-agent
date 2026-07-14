@@ -6,15 +6,31 @@ import { RawSubmission } from '@prism/contracts'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 
+import {
+  devReloadEnabled,
+  devReloadSnippet,
+  registerDevReload,
+} from './dev-reload'
 import { mockMode } from './env'
 import { startPipeline } from './run'
 import { applications, createApplication, subscribe } from './store'
 
 const app = new Hono()
 
-app.get('/', (c) =>
-  c.html(readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8'))
-)
+app.get('/', (c) => {
+  const html = readFileSync(
+    new URL('../../web/index.html', import.meta.url),
+    'utf8'
+  )
+
+  return c.html(
+    devReloadEnabled
+      ? html.replace('</body>', `${devReloadSnippet}\n</body>`)
+      : html
+  )
+})
+
+if (devReloadEnabled) registerDevReload(app)
 
 app.get('/health', (c) => c.json({ ok: true, mockMode }))
 
