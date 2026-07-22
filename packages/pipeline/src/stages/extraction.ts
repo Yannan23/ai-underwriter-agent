@@ -21,6 +21,16 @@ function asNumber(v: unknown): number | undefined {
   return undefined
 }
 
+/** Blank keeps the fixture; a typed non-11-digit value becomes null for Stage 2. */
+function mergeMockAbn(
+  formAbn: string | undefined,
+  fixtureAbn: string | null
+): string | null {
+  if (!formAbn) return fixtureAbn
+
+  return /^\d{11}$/.test(formAbn) ? formAbn : null
+}
+
 /**
  * Mock stand-in for the second Haiku call (free text → controlled taxonomy).
  * Keyword-based so the offline demo still reacts to what you type — e.g.
@@ -72,7 +82,8 @@ export const extractionStage: PipelineStage = {
       insured: {
         ...base.insured,
         legalName: asString(form.legalName) ?? base.insured.legalName,
-        abn: abn && /^\d{11}$/.test(abn) ? abn : base.insured.abn,
+        // Blank → fixture (demo). Typed but not 11 digits → null (validation flags it).
+        abn: mergeMockAbn(abn, base.insured.abn),
         state: AU_STATES.includes(stateCode as (typeof AU_STATES)[number])
           ? stateCode
           : base.insured.state,

@@ -4,6 +4,7 @@ import {
   type ValidationIssue,
 } from '@prism/contracts'
 
+import { isValidAbn } from '../abn'
 import { PipelineHalt } from '../runner'
 import { type PipelineStage } from '../state'
 
@@ -19,11 +20,38 @@ export const REQUIRED_FIELD_PATHS = [
   'cover.limitRequested',
 ] as const
 
+/**
+ * Prefer the form value when the broker typed one — mock extraction used to
+ * silently replace malformed ABNs with the fixture, which hid the error.
+ */
+function abnCandidate(
+  app: ExtractedApplication,
+  form: Record<string, unknown>
+): string | null {
+  const raw = form.abn
+
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    return raw.replace(/\s/g, '')
+  }
+
+  return app.insured.abn
+}
+
 export function findValidationIssues(
-  app: ExtractedApplication
+  app: ExtractedApplication,
+  form: Record<string, unknown> = {}
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = []
+  const abn = abnCandidate(app, form)
 
+  if (abn !== null && !isValidAbn(abn)) {
+    issues.push({
+      path: 'insured.abn',
+      code: 'invalid',
+      message:
+        'ABN is not a valid 11-digit Australian Business Number — please confirm it.',
+    })
+  }
   if (app.business.annualFeeIncome === null) {
     issues.push({
       path: 'business.annualFeeIncome',
@@ -74,7 +102,7 @@ export const validationStage: PipelineStage = {
     const app = state.extraction
 
     if (!app) throw new Error('validation requires extraction output')
-    const issues = findValidationIssues(app)
+    const issues = findValidationIssues(app, state.submission.form)
 
     if (issues.length > 0) {
       const rfi = RfiRequest.parse({

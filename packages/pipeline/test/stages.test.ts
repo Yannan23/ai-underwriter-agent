@@ -139,6 +139,41 @@ describe('validation stage', () => {
     expect(codes).toContain('low_confidence')
   })
 
+  test('flags an ABN that fails the checksum', () => {
+    const badAbn = ExtractedApplication.parse({
+      ...app,
+      insured: { ...app.insured, abn: '51824753557' },
+    })
+    const issues = findValidationIssues(badAbn)
+
+    expect(issues).toContainEqual({
+      path: 'insured.abn',
+      code: 'invalid',
+      message:
+        'ABN is not a valid 11-digit Australian Business Number — please confirm it.',
+    })
+  })
+
+  test('flags a malformed form ABN even when extraction fell back', () => {
+    const issues = findValidationIssues(app, { abn: 'fd' })
+
+    expect(issues).toContainEqual({
+      path: 'insured.abn',
+      code: 'invalid',
+      message:
+        'ABN is not a valid 11-digit Australian Business Number — please confirm it.',
+    })
+  })
+
+  test('does not flag a missing ABN as a checksum failure', () => {
+    const noAbn = ExtractedApplication.parse({
+      ...app,
+      insured: { ...app.insured, abn: null },
+    })
+
+    expect(findValidationIssues(noAbn)).toEqual([])
+  })
+
   test('halts the pipeline with an RFI when issues exist', async () => {
     const missingIncome = ExtractedApplication.parse({
       ...app,
@@ -341,13 +376,12 @@ describe('extraction stage', () => {
     expect(extraction?.history.claimsLast5Years).toHaveLength(1)
   })
 
-  test('falls back to the fixture for blank, malformed, or unknown values', async () => {
+  test('falls back to the fixture for blank or unknown values', async () => {
     const state: PipelineState = {
       submission: {
         source: 'form',
         form: {
           legalName: '   ',
-          abn: '12345',
           state: 'ZZ',
           yearsInPractice: 'many',
           annualFeeIncome: Number.NaN,
@@ -369,6 +403,18 @@ describe('extraction stage', () => {
       app.business.annualFeeIncome
     )
     expect(extraction?.business.occupation).toBe(app.business.occupation)
+  })
+
+  test('clears a malformed form ABN instead of keeping the fixture', async () => {
+    const state: PipelineState = {
+      submission: {
+        source: 'form',
+        form: { abn: 'fd' },
+      },
+    }
+    const result = await extractionStage.run(state, mockCtx())
+
+    expect(result.extraction?.insured.abn).toBeNull()
   })
 })
 

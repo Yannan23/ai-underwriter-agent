@@ -149,6 +149,20 @@
         outline-offset: -1px;
         border-color: var(--magenta);
       }
+      .field.invalid input {
+        border-color: var(--magenta);
+        background: var(--pink-tint);
+      }
+      .field .hint {
+        display: none;
+        margin: 0;
+        font-size: 13px;
+        color: var(--magenta);
+        font-weight: 600;
+      }
+      .field.invalid .hint {
+        display: block;
+      }
       input::placeholder {
         color: #9a9a9a;
       }
@@ -456,7 +470,14 @@
           </div>
           <div class="field">
             <label for="abn">ABN</label
-            ><input id="abn" name="abn" placeholder="51 824 753 556" />
+            ><input
+              id="abn"
+              name="abn"
+              placeholder="51 824 753 556"
+              inputmode="numeric"
+              autocomplete="off"
+            />
+            <p class="hint">Enter a valid 11-digit ABN.</p>
           </div>
           <div class="field">
             <label for="occupation">Occupation / services</label
@@ -703,10 +724,38 @@
         resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
       }
 
+      const ABN_WEIGHTS = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+
+      function isValidAbn(abn) {
+        const digits = String(abn).replace(/\s/g, '')
+        if (!/^\d{11}$/.test(digits)) return false
+        let sum = 0
+        for (let i = 0; i < ABN_WEIGHTS.length; i++) {
+          sum += (Number(digits.charAt(i)) - (i === 0 ? 1 : 0)) * ABN_WEIGHTS[i]
+        }
+        return sum % 89 === 0
+      }
+
+      function setAbnValidity() {
+        const input = document.getElementById('abn')
+        const field = input.closest('.field')
+        const raw = input.value.trim()
+        const ok = raw === '' || isValidAbn(raw)
+        field.classList.toggle('invalid', !ok)
+        return ok
+      }
+
+      document.getElementById('abn').addEventListener('input', setAbnValidity)
+      document.getElementById('abn').addEventListener('blur', setAbnValidity)
+
       document
         .getElementById('proposal-form')
         .addEventListener('submit', async (ev) => {
           ev.preventDefault()
+          if (!setAbnValidity()) {
+            document.getElementById('abn').focus()
+            return
+          }
           const btn = document.getElementById('submit-btn')
           btn.disabled = true
           if (es) es.close()
