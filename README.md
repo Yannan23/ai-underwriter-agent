@@ -17,6 +17,7 @@ The stack described later in this README is the **current demo implementation**.
 - [Production deployment and release architecture](./docs/deployment-architecture.md)
 - [Backend internal component architecture](./docs/backend-architecture.md)
 - [Frontend internal component architecture](./docs/frontend-architecture.md)
+- [Production repository rebuild plan](./docs/rebuild-plan.md)
 
 The target documents are design decisions, not a claim that every AWS component has already been implemented in this repository.
 
