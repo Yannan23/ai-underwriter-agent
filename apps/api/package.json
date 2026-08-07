@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.7",
+    "@hono/node-server": "^2.0.12",
     "@prism/config": "workspace:*",
     "@prism/contracts": "workspace:*",
     "@prism/pipeline": "workspace:*",
