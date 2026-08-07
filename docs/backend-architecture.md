@@ -1,38 +1,38 @@
-# Prism 后端内部组件架构
+# Prism Backend Internal Component Architecture
 
-> 文档状态：生产目标架构
+> Document status: production target architecture
 >
-> 上层架构：[Prism AI Underwriter Agent 生产架构](./architecture.md)
+> Parent document: [Prism AI Underwriter Agent Production Architecture](./architecture.md)
 >
-> 配套文档：[Mermaid 架构图集](./architecture-diagrams.md) · [生产部署与发布架构](./deployment-architecture.md) · [前端内部组件架构](./frontend-architecture.md)
+> Companion documents: [Mermaid architecture diagrams](./architecture-diagrams.md) · [Production deployment and release architecture](./deployment-architecture.md) · [Frontend internal component architecture](./frontend-architecture.md)
 
-## 1. 后端形态
+## 1. Backend Shape
 
-后端采用：
+The backend uses:
 
 ```text
-Core API 模块化单体
-+ 独立、按工作负载扩缩容的异步 Worker
-+ Step Functions Standard 持久工作流
-+ Aurora PostgreSQL 业务事实
+Core API modular monolith
++ independent asynchronous Workers scaled by workload
++ Step Functions Standard durable workflows
++ Aurora PostgreSQL as business truth
 ```
 
-Core API 内部使用六边形/端口适配器分层。模块化单体提供明确领域边界和同库事务，不为了形式上的微服务拆成大量网络调用。Document、AI、External Integration 和 Binding Worker 因资源、并发和失败模式不同而独立部署。
+Core API uses a hexagonal / ports-and-adapters layering model internally. The modular monolith gives clear domain boundaries and same-database transactions without splitting into many network calls for the sake of microservices. Document, AI, External Integration, and Binding Workers are deployed separately because their resource needs, concurrency, and failure modes differ.
 
-物理部署上，Core API 是通过 Regional API Gateway REST API、VPC Link V2 和 Internal ALB 暴露的 ECS Fargate Service；Worker 是同一 Cluster 内具有独立 Task Role、Security Group、Queue、DLQ 和伸缩上限的 ECS Service。小型事件路由、Workflow Starter 和 WebSocket Adapter 使用 Lambda。完整边界见[生产部署与发布架构](./deployment-architecture.md)。
+Physically, Core API is an ECS Fargate service exposed through Regional API Gateway REST API, VPC Link V2, and an internal ALB. Workers are ECS services in the same cluster, each with its own task role, security group, queue, DLQ, and scaling ceiling. Small event-routing, workflow-starter, and WebSocket adapter workloads use Lambda. See [Production deployment and release architecture](./deployment-architecture.md) for the full boundary.
 
-原则：
+Principles:
 
-1. Domain 不依赖 HTTP、AWS SDK、数据库 Driver 或模型 SDK。
-2. Application Use Case 定义授权、事务意图和跨聚合编排。
-3. 每张业务表只有一个模块写入所有者。
-4. 长流程由 Workflow 编排；Core API 不作为内部 HTTP 跳板。
-5. Worker 先持久化结果，再 Callback Step Functions。
-6. AI 只输出结构化风险分析，不能写 Decision、Pricing、Quote 或 Binding。
-7. Aurora 是业务事实；Workflow History、Queue 和日志都不是。
-8. 所有副作用、重试和恢复必须幂等、可观察、可审计。
+1. Domain code does not depend on HTTP, AWS SDKs, database drivers, or model SDKs.
+2. Application Use Cases define authorization, transaction intent, and cross-aggregate orchestration.
+3. Every business table has exactly one module that owns writes.
+4. Long-running flows are orchestrated by workflows; Core API is not an internal HTTP relay.
+5. Workers persist results before calling back Step Functions.
+6. AI only emits structured risk analysis; it cannot write Decision, Pricing, Quote, or Binding facts.
+7. Aurora is business truth; workflow history, queues, and logs are not.
+8. All side effects, retries, and recovery paths must be idempotent, observable, and auditable.
 
-## 2. 总体内部结构
+## 2. Internal Structure
 
 ```mermaid
 flowchart TB
@@ -86,11 +86,11 @@ flowchart TB
     Publisher --> Outbox
 ```
 
-入站 Adapter（HTTP、SQS、Event、Recovery）都只能调用 Application API，不能绕过聚合和模块写入边界。
+Inbound adapters such as HTTP, SQS, events, and recovery code may only call the Application API. They must not bypass aggregates or module write boundaries.
 
-## 3. Core API 的逻辑 BFF
+## 3. Logical BFFs Inside Core API
 
-Core API 是一个部署单元，包含三个逻辑 Route Module：
+Core API is one deployment unit with three logical route modules:
 
 ```text
 /broker/api/v1/*
@@ -98,141 +98,141 @@ Core API 是一个部署单元，包含三个逻辑 Route Module：
 /admin/api/v1/*
 ```
 
-| Route Module | 主要职责                                                            |
+| Route module | Primary responsibilities                                            |
 | ------------ | ------------------------------------------------------------------- |
-| Broker       | Draft、Upload Session、Submit、RFI、Quote、Acceptance               |
-| Underwriter  | Queue、Case Workspace、Evidence、Assessment、Decision、Assignment   |
-| Admin        | Configuration Draft、Validation、Approval、Release、Rollback、Audit |
+| Broker       | Draft, Upload Session, Submit, RFI, Quote, Acceptance               |
+| Underwriter  | Queue, Case Workspace, Evidence, Assessment, Decision, Assignment   |
+| Admin        | Configuration Draft, Validation, Approval, Release, Rollback, Audit |
 
-BFF 可以组合页面 Projection、映射 DTO、执行资源授权和协议并发控制，但不能承载 Eligibility、Pricing、Authority 或状态机逻辑。
+BFF routes may compose page projections, map DTOs, perform resource authorization, and enforce protocol-level concurrency. They must not contain eligibility, pricing, authority, or state-machine logic.
 
-每个请求依次经过：
+Each request passes through:
 
-1. Correlation/Trace Context；
-2. Central Error Handler；
-3. Authentication Context；
-4. Active Membership/Tenant/Brokerage Context；
-5. Resource-level Policy Enforcement；
-6. OpenAPI/Schema Validation；
-7. Idempotency 或 `If-Match`；
-8. Application Use Case；
-9. Problem Details/Response Mapping。
+1. correlation and trace context;
+2. central error handler;
+3. authentication context;
+4. active membership, tenant, and brokerage context;
+5. resource-level policy enforcement;
+6. OpenAPI/schema validation;
+7. idempotency or `If-Match`;
+8. Application Use Case;
+9. Problem Details and response mapping.
 
-## 4. 领域模块与数据库所有权
+## 4. Domain Modules and Database Ownership
 
-| 模块          | 主要聚合/实体                                          | Schema          | 写入所有权               |
-| ------------- | ------------------------------------------------------ | --------------- | ------------------------ |
-| Identity      | Identity、TenantMembership                             | `identity`      | 身份和 Tenant Membership |
-| Distribution  | Brokerage、Membership、Appointment                     | `distribution`  | 渠道与委任关系           |
-| Submission    | Application、Submission、RFI                           | `submission`    | 草稿、提交版本、补件     |
-| Document      | Document、DocumentVersion、Extraction、Evidence        | `document`      | 文档与证据               |
-| Underwriting  | Case、Evaluation、RiskSnapshot、ReviewTask、Assessment | `underwriting`  | 核保执行与人工责任       |
-| Pricing/Quote | PricingResult、Quote、QuoteVersion                     | `pricing`       | 定价与报价               |
-| Binding       | QuoteAcceptance、PolicyBinding                         | `binding`       | 接受和出单 Saga          |
-| Configuration | Product、Rules、Authority、Prompt、KB Release          | `configuration` | 不可变配置发布           |
-| Platform      | StageExecution、Operation、Outbox、Idempotency         | `platform`      | 平台协调记录             |
-| Audit         | AuditRecord                                            | `audit`         | 追加写审计               |
+| Module        | Main aggregates/entities                               | Schema          | Write owner                                     |
+| ------------- | ------------------------------------------------------ | --------------- | ----------------------------------------------- |
+| Identity      | Identity, TenantMembership                             | `identity`      | Identity and tenant membership                  |
+| Distribution  | Brokerage, Membership, Appointment                     | `distribution`  | Distribution and appointments                   |
+| Submission    | Application, Submission, RFI                           | `submission`    | Drafts, submitted versions, RFI                 |
+| Document      | Document, DocumentVersion, Extraction, Evidence        | `document`      | Documents and evidence                          |
+| Underwriting  | Case, Evaluation, RiskSnapshot, ReviewTask, Assessment | `underwriting`  | Underwriting execution and human accountability |
+| Pricing/Quote | PricingResult, Quote, QuoteVersion                     | `pricing`       | Pricing and quotes                              |
+| Binding       | QuoteAcceptance, PolicyBinding                         | `binding`       | Acceptance and issuance saga                    |
+| Configuration | Product, Rules, Authority, Prompt, KB Release          | `configuration` | Immutable configuration releases                |
+| Platform      | StageExecution, Operation, Outbox, Idempotency         | `platform`      | Platform coordination records                   |
+| Audit         | AuditRecord                                            | `audit`         | Append-only audit                               |
 
-其他模块可以通过公开 Query/Port 读取，但不能直接更新非所属 Schema。跨模块强一致业务动作由一个 Application Use Case 通过公开模块接口和同一个数据库事务完成。
+Other modules may read through public queries or ports, but they cannot directly update schemas they do not own. Strongly consistent cross-module business actions are performed by one Application Use Case through public module interfaces inside one database transaction.
 
-## 5. 核心聚合与不变量
+## 5. Core Aggregates and Invariants
 
-### 5.1 Application 与 Submission
+### 5.1 Application and Submission
 
-- Application Draft 可编辑，保存 `formVersion` 和乐观锁 `version`。
-- Submit 必须针对明确 Draft Version，创建不可变 Submission Version。
-- 一个 Submission 固定 Tenant、Brokerage、Appointment、Actor、产品和文档版本集合。
-- RFI 补件不修改旧 Submission，而是产生新 Submission。
+- Application Draft is editable and stores `formVersion` plus optimistic-lock `version`.
+- Submit must target an explicit Draft Version and creates an immutable Submission Version.
+- A Submission pins Tenant, Brokerage, Appointment, Actor, Product, and document versions.
+- RFI supplements do not mutate old Submissions; they create new Submissions.
 
-### 5.2 Underwriting Case 与 Evaluation
+### 5.2 Underwriting Case and Evaluation
 
-- Case 是业务责任容器，可跨多个 Submission/Evaluation。
-- Evaluation 只针对一个 Submission 和一个 Configuration Snapshot。
-- Evaluation 结果不可变；新事实产生新 Evaluation，旧结果 `SUPERSEDED`。
-- Case 同时只能有一个 Active HumanReviewTask 和一个 Primary Assignee。
-- Human Assessment 不覆盖 AI Assessment。
+- Case is the business-accountability container and may span multiple Submissions/Evaluations.
+- Evaluation targets exactly one Submission and one Configuration Snapshot.
+- Evaluation results are immutable; new facts create a new Evaluation and mark old results `SUPERSEDED`.
+- A Case can have only one active HumanReviewTask and one Primary Assignee at a time.
+- Human Assessment does not overwrite AI Assessment.
 
-### 5.3 Pricing、Quote 与 Binding
+### 5.3 Pricing, Quote, and Binding
 
-- Pricing Result 是确定性、不可变的计算产物，包含费率/规则版本和完整计算明细。
-- Quote Version 引用一个 Pricing Result、Coverage、批准 Clause 和 Expiry。
-- Broker 接受精确 Quote Version；过期或风险/条款变化产生新 Pricing/Quote。
-- Quote Acceptance 是事实；Binding 失败不回滚 Acceptance。
+- Pricing Result is deterministic and immutable. It includes rate/rule versions and full calculation details.
+- Quote Version references one Pricing Result, Coverage, approved Clauses, and Expiry.
+- Broker accepts an exact Quote Version. Expired quotes or changed risk/terms create new Pricing/Quote versions.
+- Quote Acceptance is a fact; Binding failure does not roll back Acceptance.
 
 ## 6. Application Use Cases
 
-| 业务区域      | 关键 Command                                                                         |
+| Business area | Key commands                                                                         |
 | ------------- | ------------------------------------------------------------------------------------ |
-| Submission    | CreateApplication、UpdateDraft、SubmitApplication、SubmitRFIResponse                 |
-| Document      | CreateUploadSession、CompleteUpload、RejectDocument、PublishDocumentResult           |
-| Underwriting  | StartEvaluation、PublishRiskSnapshot、PublishAIResult、RouteEvaluation               |
-| Human Review  | AssignReview、ReassignReview、RecordHumanAssessment、RecordDecision、ApproveDecision |
-| Quote         | PublishQuote、ExpireQuote、AcceptQuote                                               |
-| Binding       | RequestBinding、RecordBindingStatus、ReconcileUnknownBinding                         |
-| Configuration | CreateDraft、ValidateRelease、ApproveRelease、ScheduleRelease、RollbackRelease       |
+| Submission    | CreateApplication, UpdateDraft, SubmitApplication, SubmitRFIResponse                 |
+| Document      | CreateUploadSession, CompleteUpload, RejectDocument, PublishDocumentResult           |
+| Underwriting  | StartEvaluation, PublishRiskSnapshot, PublishAIResult, RouteEvaluation               |
+| Human Review  | AssignReview, ReassignReview, RecordHumanAssessment, RecordDecision, ApproveDecision |
+| Quote         | PublishQuote, ExpireQuote, AcceptQuote                                               |
+| Binding       | RequestBinding, RecordBindingStatus, ReconcileUnknownBinding                         |
+| Configuration | CreateDraft, ValidateRelease, ApproveRelease, ScheduleRelease, RollbackRelease       |
 
-典型 Command Use Case：
+Typical command use-case flow:
 
 ```text
-解析 Actor/Command
-→ 查询 Idempotency Record
-→ 加载 Aggregate + Version
-→ 资源授权与 Authority Check
-→ 执行 Domain Behavior/Policy
-→ 同一事务保存 Aggregate、Version、Audit Metadata、Outbox
-→ Commit
-→ 返回 Resource Version / 202 Operation
+Parse Actor/Command
+-> read Idempotency Record
+-> load Aggregate + Version
+-> enforce resource authorization and Authority Check
+-> execute Domain Behavior/Policy
+-> persist Aggregate, Version, Audit Metadata, and Outbox in one transaction
+-> Commit
+-> return Resource Version / 202 Operation
 ```
 
-数据库事务内不得包含模型或第三方网络调用。需要外部结果时先持久化状态，由 Workflow/Worker 执行，再通过新的受控 Command/Result 恢复。
+Database transactions must not contain model calls or third-party network calls. When an external result is required, persist state first, let Workflow/Worker execute the external work, and resume through a new controlled Command/Result.
 
-## 7. 状态机与领域策略
+## 7. State Machines and Domain Policies
 
-每种 Aggregate 独立维护状态机，不用一个 `application_status` 控制所有流程。
+Each aggregate owns its own state machine. Do not use one `application_status` to control every process.
 
-核心纯 Domain Policy：
+Core pure-domain policies:
 
-- Application/Submission Transition Policy；
-- Risk Snapshot Validation Policy；
-- Eligibility/Knockout Policy；
-- Confidence/Automation Policy；
-- Pricing Policy；
-- Decision Gate Policy；
-- Underwriting Authority Policy；
-- Quote Validity/Acceptance Policy；
-- External Check Freshness Policy。
+- Application/Submission Transition Policy;
+- Risk Snapshot Validation Policy;
+- Eligibility/Knockout Policy;
+- Confidence/Automation Policy;
+- Pricing Policy;
+- Decision Gate Policy;
+- Underwriting Authority Policy;
+- Quote Validity/Acceptance Policy;
+- External Check Freshness Policy.
 
-Policy 接收不可变输入，返回类型化 Outcome 和 Reason Codes，不访问数据库、模型或网络。Policy Version 和执行输入/输出哈希进入审计。
+Policies take immutable inputs and return typed outcomes and reason codes. They do not access databases, models, or networks. Policy Version and execution input/output hashes are written to audit.
 
-## 8. 工作流边界
+## 8. Workflow Boundaries
 
-三个独立 Standard Workflow：
+Three independent Standard workflows:
 
-| Workflow                | 业务身份            | 责任                                        |
-| ----------------------- | ------------------- | ------------------------------------------- |
-| Document Processing     | `documentVersionId` | 扫描、OCR、归一化、证据和处理状态           |
-| Underwriting Evaluation | `evaluationId`      | 风险事实、规则、外部检查、AI、Pricing、路由 |
-| Policy Binding          | `bindingId`         | PAS 出单、查询、重试和人工对账              |
+| Workflow                | Business identity   | Responsibility                                           |
+| ----------------------- | ------------------- | -------------------------------------------------------- |
+| Document Processing     | `documentVersionId` | Scan, OCR, normalization, evidence, and processing state |
+| Underwriting Evaluation | `evaluationId`      | Risk facts, rules, external checks, AI, pricing, routing |
+| Policy Binding          | `bindingId`         | PAS issuance, polling, retry, and manual reconciliation  |
 
-Document Workflow 在上传完成后启动，不属于 Submit 事务，也不要求 Evaluation 嵌套启动；Evaluation 建立文档 Barrier 并复用已完成结果。
+Document Workflow starts after upload completion. It is not part of the Submit transaction and does not require Evaluation to start it. Evaluation establishes a document-readiness barrier and reuses completed document results.
 
-Submit 在 Aurora 事务中创建 Submission、Evaluation 和 Outbox。事务提交后，Workflow Starter 幂等启动 `evaluationId` Execution，避免数据库成功但 Workflow 丢失的双写窗口。
+Submit creates Submission, Evaluation, and Outbox in an Aurora transaction. After commit, Workflow Starter idempotently starts the `evaluationId` execution, avoiding the dual-write window where the database succeeds but workflow start is lost.
 
-RFI 结束当前 Evaluation；Human Review 可保持同一 Evaluation 的 Callback Wait。Notification、Analytics 和 Audit Archive 不进入主流程关键路径。
+RFI ends the current Evaluation. Human Review may keep the same Evaluation in a Callback Wait. Notification, Analytics, and Audit Archive are not on the critical path.
 
-## 9. SQS Callback Worker 协议
+## 9. SQS Callback Worker Protocol
 
-长耗时、外部或资源受限 Stage 使用：
+Long-running, external, or resource-constrained stages use:
 
 ```text
 Step Functions .waitForTaskToken
-→ workload-specific SQS Task
-→ Worker
-→ persist Domain Result
-→ SendTaskSuccess/Failure
+-> workload-specific SQS Task
+-> Worker
+-> persist Domain Result
+-> SendTaskSuccess/Failure
 ```
 
-不是每个 State 都经过 SQS。Choice、Wait、Pass、短确定性 Adapter 和可直接集成的 AWS API 可以留在 Workflow 内。
+Not every state goes through SQS. Choice, Wait, Pass, short deterministic adapters, and directly integrated AWS APIs can stay inside the workflow.
 
 ### 9.1 Task Envelope
 
@@ -245,141 +245,141 @@ deadlineAt / traceContext / idempotencyKey
 callbackTaskToken
 ```
 
-消息只携带引用，不携带文档和大对象。Task Token 不进入日志。Worker 从 Aurora 验证 Tenant、Evaluation、Context、Deadline 和当前状态。
+Messages carry references only, not documents or large objects. Task Tokens are not logged. Workers validate Tenant, Evaluation, Context, Deadline, and current state from Aurora.
 
-### 9.2 Worker 执行模板
+### 9.2 Worker Execution Template
 
 ```text
 Load StageExecution by stable idempotency key
 ├── SUCCEEDED: retry callback only / acknowledge duplicate
 ├── RUNNING by valid lease: do not duplicate
 └── eligible: create StageAttempt
-       → execute bounded task
-       → persist immutable typed result
-       → atomically mark accepted result
-       → callback workflow
+       -> execute bounded task
+       -> persist immutable typed result
+       -> atomically mark accepted result
+       -> callback workflow
 ```
 
-稳定幂等键推荐 `evaluationId + stageName + stageExecutionVersion`。SQS 的 At-least-once、Visibility Timeout、Worker Crash 和 Callback Failure 都不能产生第二个业务效果。
+Recommended stable idempotency key: `evaluationId + stageName + stageExecutionVersion`. SQS at-least-once delivery, visibility timeouts, Worker crashes, and callback failures must not produce a second business effect.
 
-### 9.3 Result 与状态
+### 9.3 Results and State
 
-Callback 只返回 `stageExecutionId`、`resultId`、`resultHash`、`status` 和时间。完整结果留在 Aurora/S3。
+Callback returns only `stageExecutionId`, `resultId`, `resultHash`, `status`, and timestamps. Full results remain in Aurora/S3.
 
 ```text
-Stage: PENDING → DISPATCHED → RUNNING → SUCCEEDED
-                            ↘ FAILED_RETRYABLE → new attempt
+Stage: PENDING -> DISPATCHED -> RUNNING -> SUCCEEDED
+                            ↘ FAILED_RETRYABLE -> new attempt
                             ↘ FAILED_TERMINAL / TIMED_OUT / CANCELLED
 
 AI Result: COMPLETE / INCOMPLETE / INVALID / SECURITY_BLOCKED / LATE_RESULT
 ```
 
-执行成功、AI 是否完整以及业务是否允许 Auto Quote 是三个不同语义。
+Execution success, AI completeness, and whether the business may auto-quote are three different meanings.
 
-### 9.4 Workflow 与 Contract 版本
+### 9.4 Workflow and Contract Versions
 
-- Step Functions 每次发布创建不可变 Version；Workflow Starter 只通过环境 Alias 启动。
-- `PROD` Alias 可以为新的 Execution 在当前/候选版本间灰度；已经开始的 Execution 永远继续原版本。
-- Evaluation 保存实际 Workflow Version ARN、Task Contract Version 和 Release ID。
-- Worker 至少支持当前和上一版兼容 Contract；破坏性变更创建新 `taskType` 或版本化 Queue。
-- 旧 Worker 和 Workflow Version 只有在没有活跃执行或等待中的 Human Review 后才能退役。
-- Alias 回滚不修改执行中的 Evaluation；受影响案件继续、受控停止或根据持久化 Checkpoint 恢复。
+- Each Step Functions release creates an immutable Version; Workflow Starter starts only through an environment Alias.
+- The `PROD` Alias may canary new executions between current and candidate versions; already-started executions always continue on their original version.
+- Evaluation stores the actual Workflow Version ARN, Task Contract Version, and Release ID.
+- Workers support at least the current and previous compatible contract; breaking changes create a new `taskType` or versioned queue.
+- Old Worker and Workflow versions can retire only after there are no active executions or waiting Human Reviews.
+- Alias rollback does not rewrite in-flight Evaluations; affected cases continue, are controlled-stopped, or recover from persisted checkpoints.
 
-## 10. AI Worker 内部边界
+## 10. AI Worker Internal Boundary
 
-AI Worker 不是通用聊天 Agent。它实现一个版本化的 `AI_RISK_ANALYSIS` Task：
+AI Worker is not a generic chat agent. It implements one versioned `AI_RISK_ANALYSIS` task:
 
 ```text
 Context Assembler
-→ Deterministic Query Planner
-→ Evidence Gateway
-→ Product-configured Parallel Risk Analyzers
-→ Consistency Checker
-→ Risk Assessment Synthesizer
-→ Schema/Citation/Policy Validator
-→ AI Assessment Repository
+-> Deterministic Query Planner
+-> Evidence Gateway
+-> Product-configured Parallel Risk Analyzers
+-> Consistency Checker
+-> Risk Assessment Synthesizer
+-> Schema/Citation/Policy Validator
+-> AI Assessment Repository
 ```
 
-内部 Ports：
+Internal ports:
 
-| Port                  | 约束                                        |
-| --------------------- | ------------------------------------------- |
-| ContextManifestReader | 只读固定 Evaluation 输入                    |
-| EvidenceGateway       | Tenant/Submission/KB Release 强作用域       |
-| ModelGateway          | Task Policy 决定模型/Prompt/Budget/Fallback |
-| AssessmentRepository  | 只写 AI 模块拥有的不可变 Result             |
-| StageRepository       | Attempt、Metrics、Error、Result Ref         |
+| Port                  | Constraint                                           |
+| --------------------- | ---------------------------------------------------- |
+| ContextManifestReader | Read-only fixed Evaluation input                     |
+| EvidenceGateway       | Strongly scoped to Tenant/Submission/KB Release      |
+| ModelGateway          | Task Policy decides model, prompt, budget, fallback  |
+| AssessmentRepository  | Writes only immutable Results owned by the AI module |
+| StageRepository       | Attempts, metrics, errors, and result references     |
 
-模型没有 SQL、任意 HTTP、S3、消息发送、Decision、Pricing、Quote 或 Binding Tool。模型可调用的少量 Evidence Tool 只读、服务端注入作用域、固定最大轮次和返回量。
+The model has no SQL, arbitrary HTTP, S3, messaging, Decision, Pricing, Quote, or Binding tools. The few Evidence tools it may use are read-only, server-scoped, bounded in turn count, and bounded in returned volume.
 
-## 11. Document 与 Evidence Pipeline
+## 11. Document and Evidence Pipeline
 
-文档处理输出不是一个最终表单 JSON，而是：
+Document processing does not output one final form JSON. It outputs:
 
 ```text
 Source Bundle
-→ Extracted Field Candidates
-→ Deterministic Reconciliation/Validation
-→ Immutable Validated Risk Snapshot
+-> Extracted Field Candidates
+-> Deterministic Reconciliation/Validation
+-> Immutable Validated Risk Snapshot
 ```
 
-每个 Candidate 保留 Document Version、页码/坐标、Extractor/Model、置信信号和原文哈希。Reconciliation 处理相同字段的来源优先级、单位/日期归一化、Applicant 声明与文档冲突。
+Each candidate keeps Document Version, page/coordinates, extractor/model, confidence signals, and source text hash. Reconciliation handles source priority, unit/date normalization, and conflicts between applicant declarations and documents.
 
-下游只读 Validated Risk Snapshot。人工修正创建新的 Snapshot/Evaluation，不能就地修改已被使用的风险事实。
+Downstream modules only read the Validated Risk Snapshot. Human correction creates a new Snapshot/Evaluation; it cannot modify risk facts already used in place.
 
-## 12. Persistence 与事务
+## 12. Persistence and Transactions
 
-### 12.1 数据规范
+### 12.1 Data Standards
 
-- 所有租户业务表显式含 `tenant_id`；租户唯一约束和高频索引以 Tenant 为范围。
-- 应用层生成 UUIDv7；可修改 Aggregate 使用 `version BIGINT`。
-- UTC `TIMESTAMPTZ` 与保险业务 `DATE` 分离。
-- 列表使用 Keyset Pagination。
-- JSONB 只存版本快照、模型输出和低频扩展；查询字段结构化。
-- 不默认使用软删除；按业务状态、归档、匿名化和保留策略表达生命周期。
-- 核心表初期不分区；高增长追加表达到阈值后按月分区。
+- Every tenant business table explicitly includes `tenant_id`; tenant-unique constraints and hot indexes are tenant-scoped.
+- Application code generates UUIDv7; mutable aggregates use `version BIGINT`.
+- UTC `TIMESTAMPTZ` is separated from insurance business `DATE`.
+- Lists use keyset pagination.
+- JSONB stores version snapshots, model outputs, and low-frequency extensions; queryable fields are structured.
+- Soft delete is not the default; lifecycle is expressed through business state, archival, anonymization, and retention policy.
+- Core tables are not partitioned initially; high-growth append-only tables are month-partitioned after thresholds are reached.
 
-### 12.2 Stage 持久化
+### 12.2 Stage Persistence
 
-`StageExecution` 保存稳定业务身份、输入/配置引用与哈希、状态和被接受的 Result Ref。`StageAttempt` 保存每次实际执行、Lease、Worker/Model/Provider、时间、Typed Error、成本和 Callback 状态。Domain Result 不可变。
+`StageExecution` stores stable business identity, input/configuration references and hashes, state, and the accepted Result Ref. `StageAttempt` stores each actual execution, lease, worker/model/provider, timestamps, typed error, cost, and callback state. Domain Results are immutable.
 
 ### 12.3 Transactional Outbox
 
-业务数据和 Outbox Row 同事务提交。Publisher 使用 `FOR UPDATE SKIP LOCKED` 批量领取，发布后记录结果。EventBridge At-least-once；每个 Consumer 使用自己的 Queue、`eventId` 去重和 Aggregate Version 处理乱序。
+Business data and Outbox rows commit in the same transaction. Publisher uses `FOR UPDATE SKIP LOCKED` to claim batches and records publish results after success. EventBridge is at-least-once; every Consumer uses its own queue, `eventId` dedupe, and Aggregate Version to handle out-of-order delivery.
 
-业务 Event 是过去事实，不携带 Task Token，不用来冒充 Workflow Command。
+Business Events are past-tense facts. They do not carry Task Tokens and must not impersonate Workflow Commands.
 
-## 13. API 契约与并发
+## 13. API Contracts and Concurrency
 
-- REST/OpenAPI 作为对外契约，生成前端 Client。
-- 异步 Command 返回 `202` 和 Operation URL。
-- 有副作用 Command 要求 `Idempotency-Key`，相同 Key+不同 Payload 返回冲突。
-- GET 返回 ETag；写操作要求 `If-Match`。
-- Stale Version 返回 `412`；当前版本下的非法业务转换返回 `409`。
-- 错误使用 `application/problem+json`，稳定 Code 与安全消息分离。
-- 状态变化用明确 Command Endpoint，禁止通用 PATCH `status`。
+- REST/OpenAPI is the external contract and generates the frontend client.
+- Asynchronous Commands return `202` and an Operation URL.
+- Side-effecting Commands require `Idempotency-Key`; same key with different payload returns a conflict.
+- GET returns ETag; writes require `If-Match`.
+- Stale Version returns `412`; illegal business transition on the current version returns `409`.
+- Errors use `application/problem+json`, with stable codes and safe messages separated.
+- State changes use explicit Command endpoints; generic PATCH `status` is forbidden.
 
-一个 Case 只分配一个 Primary Underwriter 仍然需要 Version Control，因为多标签页、后台更新、管理员 Reassignment、新 Evaluation 和 Approval 都可能竞争。
+Assigning a Case to a single Primary Underwriter still requires version control because multiple tabs, background updates, admin reassignment, new Evaluations, and approval tasks can compete.
 
-## 14. Read Model 与实时通知
+## 14. Read Models and Realtime Notifications
 
-Aurora Normalized Write Model 是 Source of Truth。Underwriter Queue、Case Workspace、Broker Timeline 和 Admin Search 使用页面特定 Read Projection；OpenSearch 可用于搜索，但不是交易真相。不采用完整 Event Sourcing。
+Aurora normalized write model is the source of truth. Underwriter Queue, Case Workspace, Broker Timeline, and Admin Search use page-specific read projections. OpenSearch may support search but is not transactional truth. The platform does not use full Event Sourcing.
 
-WebSocket Event 只包含 Event ID、Sequence、Resource、Version 和 Event Type。客户端随后通过 REST 获取权威 Projection；乱序事件按 Resource Version 忽略，断线无法补发时要求 Full Resync。
+WebSocket events contain only Event ID, Sequence, Resource, Version, and Event Type. Clients then fetch the authoritative projection through REST. Out-of-order events are ignored by Resource Version; when disconnects cannot be replayed, the client performs a full resync.
 
 ## 15. Configuration Control Plane
 
-Product、Form、Validation、Eligibility、Pricing、Authority、Clause、Workflow、Prompt、Model Task Policy、Retrieval 和 KB Release 均为不可变发布物。
+Product, Form, Validation, Eligibility, Pricing, Authority, Clause, Workflow, Prompt, Model Task Policy, Retrieval, and KB Release are immutable release artifacts.
 
 ```text
-DRAFT → VALIDATING → APPROVED → SCHEDULED → ACTIVE → RETIRED
+DRAFT -> VALIDATING -> APPROVED -> SCHEDULED -> ACTIVE -> RETIRED
 ```
 
-高风险配置 Maker-checker；发布前执行 Schema、规则冲突、Pricing Regression、AI Eval 和 E2E Sample。`EvaluationConfigurationSnapshot` 在 Evaluation 启动时解析一次并固定。
+High-risk configuration uses maker-checker. Before release, run schema checks, rule-conflict detection, pricing regression, AI eval, and E2E samples. `EvaluationConfigurationSnapshot` is resolved once when Evaluation starts and then pinned.
 
-## 16. Failure、Retry 与 DLQ
+## 16. Failure, Retry, and DLQ
 
-统一错误类别：
+Unified error categories:
 
 ```text
 TRANSIENT_DEPENDENCY
@@ -389,52 +389,52 @@ SECURITY
 UNKNOWN_OUTCOME
 ```
 
-- 业务级 Retry 由 Step Functions 统一协调；SDK 只做极短网络重试。
-- 相同输入的语义错误不能无限重抽模型。
-- Security Error 隔离且不自动重试。
-- Unknown Outcome 先查 Provider/Stage 状态。
-- DLQ 不自动无限 Redrive；先修复原因，再使用原幂等键审计化重放。
-- 不可恢复技术错误把 Evaluation 置为 `OPERATIONAL_HOLD`，不映射为业务 Referral。
+- Business-level retry is coordinated by Step Functions; SDKs only perform very short network retries.
+- Semantic errors for the same input must not trigger infinite model retries.
+- Security errors are isolated and not auto-retried.
+- Unknown outcomes first query provider/stage status.
+- DLQ messages are not redriven indefinitely; fix the cause first, then replay with the original idempotency key and audit.
+- Non-recoverable technical errors place the Evaluation in `OPERATIONAL_HOLD`; they are not mapped to business Referral.
 
-## 17. 身份、安全与审计
+## 17. Identity, Security, and Audit
 
-- JWT 密码学验证后仍映射内部 Identity/Membership，并进行资源级授权。
-- Tenant/Brokerage/Role 不能信任客户端；所有 Repository Query 显式作用域化。
-- PostgreSQL RLS 仅作纵深防御。
-- Worker 通过独立 IAM Role 和最小权限访问 Queue、KMS、S3、Bedrock 和数据库。
-- 不可信文档、RAG 和 Provider 文本与 System Instruction 分离；正式 AI 优先读 Risk Snapshot。
-- 所有模型输出经过 Schema、Evidence、Policy 和安全验证。
-- Audit 记录 Actor、Membership、Tenant、Authority、Reason、配置/结果版本、Correlation/Causation。
-- 普通日志不记录 Token、Task Token、完整 Prompt、文档、PII 或 Secret。
+- After cryptographic JWT validation, the request still maps to internal Identity/Membership and performs resource-level authorization.
+- Tenant, Brokerage, and Role are never trusted from the client; every repository query is explicitly scoped.
+- PostgreSQL RLS is defense in depth only.
+- Workers use independent IAM roles and least privilege for Queue, KMS, S3, Bedrock, and database access.
+- Untrusted documents, RAG text, and provider text are separated from system instructions; production AI reads the Risk Snapshot first.
+- All model output passes schema, evidence, policy, and safety validation.
+- Audit records Actor, Membership, Tenant, Authority, Reason, configuration/result versions, Correlation, and Causation.
+- Normal logs do not record tokens, Task Tokens, full prompts, documents, PII, or secrets.
 
-## 18. Observability 与运行控制
+## 18. Observability and Operational Control
 
-Trace 贯穿 HTTP/Outbox/Event/Workflow/SQS/Worker/Tool/Model/Callback。指标覆盖：
+Trace spans HTTP, Outbox, Event, Workflow, SQS, Worker, Tool, Model, and Callback. Metrics cover:
 
-- API latency/error、Queue Age、Stage/Attempt、Worker saturation、Callback 和 DLQ；
-- Model latency/token/cost/throttle/fallback、Schema/Citation/Policy Failure；
-- Unsupported Assertion、Abstention、Human Disposition 和 Release Drift；
-- Auto Quote、RFI、Referral、Turnaround、Override 和 Binding Failure。
+- API latency/error, Queue Age, Stage/Attempt, Worker saturation, Callback, and DLQ;
+- model latency/token/cost/throttle/fallback, Schema/Citation/Policy Failure;
+- Unsupported Assertion, Abstention, Human Disposition, and Release Drift;
+- Auto Quote, RFI, Referral, Turnaround, Override, and Binding Failure.
 
-Safety 事故触发 Automation Kill Switch；质量回归停止 Canary/回滚；依赖事故按 Runbook 执行 Fallback、Hold 或恢复。Telemetry 与长期业务 Audit 分离。
+Safety incidents trigger the Automation Kill Switch. Quality regression stops canary or rolls back. Dependency incidents follow runbooks for fallback, hold, or recovery. Telemetry is separated from long-term business audit.
 
-## 19. 测试策略
+## 19. Testing Strategy
 
-| 层级                   | 重点                                                     |
-| ---------------------- | -------------------------------------------------------- |
-| Domain Unit            | 状态机、Eligibility、Pricing、Authority、Decision Gate   |
-| Use Case               | 权限、事务、Idempotency、Outbox、Version Conflict        |
-| Repository Integration | PostgreSQL Schema、索引、锁、Migration                   |
-| Adapter Contract       | S3、Bedrock、OpenSearch、Provider/PAS                    |
-| API Contract           | OpenAPI、Problem Details、ETag、Idempotency              |
-| Event/Task Contract    | Schema 兼容、重复、乱序、Token Redaction                 |
-| Workflow               | Retry、Timeout、Callback、RFI、Human Wait、Recovery      |
-| AI Eval                | Extraction、Retrieval、Grounding、Risk、Abstention、安全 |
-| E2E                    | Submit、Auto Quote、RFI、新 Evaluation、Human、Binding   |
+| Layer                  | Focus                                                                  |
+| ---------------------- | ---------------------------------------------------------------------- |
+| Domain Unit            | State machines, Eligibility, Pricing, Authority, Decision Gate         |
+| Use Case               | Permissions, transactions, idempotency, Outbox, version conflicts      |
+| Repository Integration | PostgreSQL schema, indexes, locks, migrations                          |
+| Adapter Contract       | S3, Bedrock, OpenSearch, Provider/PAS                                  |
+| API Contract           | OpenAPI, Problem Details, ETag, Idempotency                            |
+| Event/Task Contract    | Schema compatibility, duplicates, out-of-order events, token redaction |
+| Workflow               | Retry, timeout, callback, RFI, human wait, recovery                    |
+| AI Eval                | Extraction, retrieval, grounding, risk, abstention, safety             |
+| E2E                    | Submit, Auto Quote, RFI, new Evaluation, Human, Binding                |
 
-普通 CI 测试不依赖实时模型；Live Model/Provider 测试在受控环境运行并设置成本和质量门槛。
+Normal CI tests do not depend on live models. Live Model/Provider tests run in controlled environments with cost and quality gates.
 
-## 20. 建议代码结构
+## 20. Recommended Code Structure
 
 ```text
 apps/core-api/src/
@@ -487,4 +487,4 @@ database/
   migrations/
 ```
 
-模块内部可以使用 `domain/application/ports/adapters`，但不强制为每个简单能力创建空目录。跨模块依赖只能通过公开入口；CI 应检查禁止深层导入和循环依赖。
+Inside each module, use `domain/application/ports/adapters` where it helps, but do not create empty folders for every simple capability. Cross-module dependencies must go through public entry points; CI should reject deep imports and cyclic dependencies.

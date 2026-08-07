@@ -1,382 +1,382 @@
-# Prism AI Underwriter 核心核保运行架构
+# Prism AI Underwriter Core Underwriting Runtime Architecture
 
-> 文档状态：根据 `docs/diagrams/174.PNG` 整理
+> Document status: derived from `docs/diagrams/174.PNG`
 >
-> 视图范围：一个 Submission 从前端接入到 Policy Binding 的核心运行路径
+> View scope: the core runtime path for a Submission from frontend intake through Policy Binding
 >
-> 部署区域：AWS `ap-southeast-2`（Sydney），跨 3 个 Availability Zone
+> Deployment region: AWS `ap-southeast-2` (Sydney), across 3 Availability Zones
 
 ![Prism AI Underwriter Core Underwriting Path](./diagrams/174.PNG)
 
-## 1. 这张图表达什么
+## 1. What This Diagram Shows
 
-这是一张 **Runtime View**，重点回答以下问题：
+This is a **Runtime View**. It answers these questions:
 
-- Broker、Underwriter 和 Administrator 如何进入系统；
-- Core API 如何可靠地接受并持久化一次 Submission；
-- 长时间运行的文档处理、外部查询和 AI 分析如何异步执行；
-- Step Functions、SQS 和 Worker 如何通过 Callback Task Token 协作；
-- 文档、业务状态和 AI Evidence 分别存放在哪里；
-- Worker 如何访问 Bedrock、Textract、OpenSearch 和外部数据提供商；
-- 报价接受后如何调用 Policy Administration System 完成 Binding；
-- 哪些处理位于核心核保路径上，哪些处理被放到异步旁路。
+- how Brokers, Underwriters, and Administrators enter the system;
+- how the Core API reliably accepts and persists a Submission;
+- how long-running document processing, external checks, and AI analysis run asynchronously;
+- how Step Functions, SQS, and Workers cooperate through Callback Task Tokens;
+- where documents, business state, and AI evidence are stored;
+- how Workers access Bedrock, Textract, OpenSearch, and external data providers;
+- how quote acceptance calls the Policy Administration System to complete Binding;
+- which work sits on the core underwriting path and which work is moved to asynchronous side channels.
 
-它不是完整的 AWS Landing Zone 或部署总图。以下内容被刻意放在其他视图中：
+It is not a complete AWS Landing Zone or deployment overview. The following topics are intentionally covered in other views:
 
-- GuardDuty、Security Hub、CloudTrail、AWS Config 等安全治理基线；
-- ECR、GitHub Actions、AppConfig 和部署晋级等 Delivery Plane；
-- Melbourne Warm Standby、数据复制和区域切换等 Multi-Region DR；
-- 详细的领域模块、数据库表和前端 Feature 结构。
+- security governance baselines such as GuardDuty, Security Hub, CloudTrail, and AWS Config;
+- the delivery plane such as ECR, GitHub Actions, AppConfig, and promotion;
+- multi-region disaster recovery such as Melbourne warm standby, data replication, and regional failover;
+- detailed domain modules, database tables, and frontend feature structure.
 
-这种拆分避免在核心业务图中堆叠与一次核保请求无直接关系的服务。
+This separation keeps the core business diagram readable and avoids stacking services that are not directly involved in a single underwriting request.
 
-## 2. 图中的架构边界
+## 2. Architecture Boundaries in the Diagram
 
-### 2.1 Global Edge & Identity
+### 2.1 Global Edge and Identity
 
-该区域负责用户接入、静态前端交付和身份认证。
+This area handles user entry, static frontend delivery, and authentication.
 
-| 组件                         | 图中职责                                                                       |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| Broker · Underwriter · Admin | 三类浏览器用户；分别使用 Broker Portal、Underwriter Workbench 和 Admin Console |
-| Route 53                     | 前端域名解析和区域入口解析                                                     |
-| AWS WAF                      | 在边缘过滤常见 Web 攻击和不符合规则的请求                                      |
-| AWS Shield                   | 为互联网入口提供 DDoS 防护基线                                                 |
-| CloudFront                   | 分发三个独立部署的 SPA，并连接各自的 S3 Origin                                 |
-| Amazon Cognito               | 承载 User Pool，并与企业 SAML/OIDC Identity Provider 联邦                      |
+| Component                    | Responsibility in the diagram                                                           |
+| ---------------------------- | --------------------------------------------------------------------------------------- |
+| Broker · Underwriter · Admin | Three browser user groups using Broker Portal, Underwriter Workbench, and Admin Console |
+| Route 53                     | Frontend DNS and regional entry resolution                                              |
+| AWS WAF                      | Edge filtering for common web attacks and invalid requests                              |
+| AWS Shield                   | Baseline DDoS protection for internet-facing entry points                               |
+| CloudFront                   | Delivers the three independently deployed SPAs and connects to their S3 origins         |
+| Amazon Cognito               | Hosts User Pools and federates with enterprise SAML/OIDC identity providers             |
 
-图中标注 `authentication only — not on the data path`，表示 Cognito 负责登录、Token 签发和身份联邦，但核保业务数据不会经过 Cognito。浏览器获得 Token 后，携带 JWT 直接调用 API Gateway。
+The diagram label `authentication only - not on the data path` means Cognito handles login, token issuance, and identity federation, but underwriting business data does not pass through Cognito. After the browser obtains a token, it calls API Gateway directly with a JWT.
 
-`Route 53 · WAF · Shield · CloudFront` 是为了简化展示而合并的边缘入口节点，不表示它们是同一个 AWS 服务。三个前端应用仍然拥有独立的 CloudFront Distribution 和 S3 Origin。
+`Route 53 · WAF · Shield · CloudFront` are combined as one simplified edge entry node for readability. They are not a single AWS service. The three frontend applications still have independent CloudFront distributions and S3 origins.
 
-### 2.2 Primary Region — Sydney
+### 2.2 Primary Region - Sydney
 
-核心业务运行在 `ap-southeast-2`，目标部署跨 3 个 AZ。
+Core business runtime runs in `ap-southeast-2`, with a target deployment across 3 AZs.
 
-图中给出的网络约束是：
+Network constraints shown in the diagram:
 
-- VPC CIDR 为 `10.20.0.0/16`；
-- Core API 和 Worker 运行在 Private Application Subnet；
-- Aurora 位于 Isolated Data Subnet；
-- 不为 ECS Application Task 分配公网入口；
-- AWS 托管服务优先通过 VPC Endpoint 私有访问；
-- 只有调用外部 Provider 和 PAS 时才经过受控 NAT Egress。
+- VPC CIDR is `10.20.0.0/16`;
+- Core API and Workers run in private application subnets;
+- Aurora lives in isolated data subnets;
+- ECS application tasks do not receive public ingress;
+- AWS managed services are accessed privately through VPC Endpoints where possible;
+- only external providers and the PAS use controlled NAT egress.
 
-图为了突出运行路径，没有展开每个 AZ、Subnet、Route Table、Security Group、NAT Gateway 和 VPC Endpoint。
+The diagram does not expand every AZ, subnet, route table, security group, NAT Gateway, or VPC Endpoint because its focus is the runtime path.
 
 ### 2.3 External Systems
 
-外部系统不属于 Prism 的信任边界，通过 Allowlist、TLS、Secret Rotation、Timeout、Retry、Circuit Breaker 和 Egress Control 访问。
+External systems sit outside Prism's trust boundary and are accessed through allowlists, TLS, secret rotation, timeouts, retries, circuit breakers, and egress controls.
 
-| 外部系统                       | 用途                                                     |
-| ------------------------------ | -------------------------------------------------------- |
-| Policy Administration System   | 接收幂等 Binding 请求，将被接受的 Quote 转换为 Policy    |
-| Registry · Claims · Fraud Data | 为核保提供企业注册、历史理赔、欺诈和合规增强数据         |
-| Notification Channels          | 发送 Email、SMS、Webhook，并向 SIEM 或分析消费者提供事件 |
+| External system                | Purpose                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| Policy Administration System   | Receives idempotent Binding requests and turns accepted Quotes into Policies |
+| Registry · Claims · Fraud Data | Provides company registry, claims history, fraud, and compliance enrichment  |
+| Notification Channels          | Sends email, SMS, webhooks, and events for SIEM or analytics consumers       |
 
-## 3. 核心组件职责
+## 3. Core Component Responsibilities
 
 ### 3.1 API Gateway
 
-图中一个节点概括了两个逻辑入口：
+The single node represents two logical entry points:
 
-- **Regional REST API**：Submission、Case、Quote、Review、Binding 等命令和查询；
-- **WebSocket API**：向浏览器推送 Evaluation、Document Processing 和 Binding 进度。
+- **Regional REST API**: commands and queries for Submissions, Cases, Quotes, Review, and Binding;
+- **WebSocket API**: progress notifications for Evaluation, Document Processing, and Binding.
 
-API Gateway 校验 Cognito 签发的 JWT，并通过 VPC Link 将 REST 请求转发给私有 ALB。WebSocket 推送是状态通知通道，不是业务事实来源；客户端断线后应通过 REST API 重新读取当前状态。
+API Gateway validates Cognito-issued JWTs and forwards REST requests to the private ALB through VPC Link. WebSocket is a state-notification channel, not the source of business truth. After reconnecting, clients must read the current state again through REST.
 
 ### 3.2 Internal ALB
 
-Internal Application Load Balancer 位于私有网络中，只接受 API Gateway VPC Link 的流量，并将请求发送给 Core API 的私有 Target Group。
+The internal Application Load Balancer lives in the private network. It only accepts traffic from API Gateway VPC Link and sends requests to the Core API private target group.
 
-它负责：
+It owns:
 
-- ECS Task 健康检查；
-- 跨 AZ 流量分发；
-- Target Group 管理；
-- Core API 的私有入口。
+- ECS task health checks;
+- cross-AZ traffic distribution;
+- target group management;
+- the private entry point for Core API.
 
-ALB 不承载身份授权和领域规则。
+ALB does not own identity authorization or domain rules.
 
-### 3.3 ECS Fargate — Core API
+### 3.3 ECS Fargate - Core API
 
-Core API 是一个部署单元内的模块化单体，跨 3 个 AZ 运行多个 ECS Fargate Task。它包含 Broker、Underwriter 和 Admin 三组 BFF Route，但不会为每组 Route 部署独立后端服务。
+Core API is a modular monolith running as multiple ECS Fargate tasks across 3 AZs. It contains Broker, Underwriter, and Admin BFF route groups, but those route groups are not deployed as separate backend services.
 
-Core API 负责：
+Core API owns:
 
-- Tenant、Membership、Role 和 Authority 授权；
-- 请求验证和领域不变量；
-- Application Draft 与不可变 Submission Version；
-- Case、Human Review、Quote 和 Acceptance 状态；
-- 幂等命令处理和乐观并发控制；
-- 在数据库事务中同时写入业务状态和 Outbox Event；
-- 创建 Evaluation ID，但不在 HTTP 请求中执行长时间 AI 分析。
+- tenant, membership, role, and authority authorization;
+- request validation and domain invariants;
+- Application Draft and immutable Submission Version;
+- Case, Human Review, Quote, and Acceptance state;
+- idempotent command handling and optimistic concurrency;
+- writing business state and Outbox Events in the same database transaction;
+- creating Evaluation IDs, without running long AI analysis inside the HTTP request.
 
-Core API 不作为 Step Functions 内部步骤之间的 HTTP 跳板。
+Core API is not an internal HTTP relay between Step Functions states.
 
 ### 3.4 Aurora PostgreSQL
 
-Aurora PostgreSQL 是业务事实来源，图中 `submission truth + outbox` 表示它至少承载：
+Aurora PostgreSQL is the business source of truth. The diagram label `submission truth + outbox` means it stores at least:
 
-- Application、Submission 和 Evaluation；
-- Case Assignment、Human Review 和 Decision；
-- Quote Version、Acceptance 和 Binding 状态；
-- Worker Result Metadata 和幂等执行记录；
-- Business Audit Event；
-- Transactional Outbox。
+- Applications, Submissions, and Evaluations;
+- Case Assignment, Human Review, and Decisions;
+- Quote Versions, Acceptance, and Binding state;
+- Worker result metadata and idempotency records;
+- Business Audit Events;
+- the Transactional Outbox.
 
-Core API 通过 RDS Proxy 管理数据库连接。一次 Submission 提交必须在同一数据库事务中完成：
+Core API uses RDS Proxy for database connection management. One Submission submit must complete the following in the same database transaction:
 
-1. 写入不可变 Submission；
-2. 创建 Evaluation；
-3. 写入 Outbox Event；
-4. 提交事务。
+1. write the immutable Submission;
+2. create the Evaluation;
+3. write the Outbox Event;
+4. commit the transaction.
 
-如果事务失败，三项修改全部回滚，因此不会出现“Submission 已保存但 Workflow 永远没有启动”或“Workflow 已启动但 Submission 不存在”的中间状态。
+If the transaction fails, all changes roll back together. This prevents intermediate states such as "Submission was saved but the workflow never starts" or "workflow started but the Submission does not exist."
 
-### 3.5 S3 — Documents & Evidence
+### 3.5 S3 - Documents and Evidence
 
-S3 节点是文档存储能力的逻辑汇总，包括：
+The S3 node is a logical summary of document storage capabilities:
 
-- Presigned Upload；
-- Quarantine Document；
-- Original Document；
-- OCR 和 Normalized Artifact；
-- Evidence Package；
-- 大型 AI 输入输出 Artifact；
-- 不可变 Audit Archive。
+- presigned upload;
+- quarantined document;
+- original document;
+- OCR and normalized artifacts;
+- Evidence Package;
+- large AI input/output artifacts;
+- immutable Audit Archive.
 
-生产实现中可以使用多个 Bucket 或受控 Prefix 分离不同生命周期和权限。Aurora 保存业务元数据、版本和对象引用，S3 保存文档和大对象；S3 不能代替 Aurora 成为业务状态机。
+A production implementation may use multiple buckets or controlled prefixes to separate lifecycle and permission boundaries. Aurora stores business metadata, versions, and object references. S3 stores documents and large objects. S3 must not replace Aurora as the business state machine.
 
-### 3.6 Outbox Relay 与 EventBridge
+### 3.6 Outbox Relay and EventBridge
 
-Outbox Relay 从 Aurora 读取尚未发布的 Outbox Record，将其发布到 EventBridge，并在成功后记录发布状态。
+The Outbox Relay reads unpublished Outbox Records from Aurora, publishes them to EventBridge, and records publish status after success.
 
-EventBridge 负责：
+EventBridge owns:
 
-- 根据类型化 Domain Event 路由消费者；
-- 启动对应的 Step Functions State Machine；
-- 将 Notification、Analytics 和 Audit Archive 等非关键处理发送到旁路消费者。
+- routing typed Domain Events to consumers;
+- starting the matching Step Functions state machine;
+- sending non-critical processing such as notifications, analytics, and audit archive to side-channel consumers.
 
-EventBridge 本身不保存核保业务真相；事件消费者必须能够处理重复投递。
+EventBridge does not store underwriting business truth. Consumers must tolerate duplicate delivery.
 
-图中 Aurora 到 EventBridge 的箭头标记为 `outbox relay`。这是一项逻辑职责，实际可由独立 Outbox Relay Worker 执行。
+The arrow from Aurora to EventBridge is labelled `outbox relay`. This is a logical responsibility and may be implemented by a dedicated Outbox Relay Worker.
 
 ### 3.7 Step Functions Standard
 
-图中的 Step Functions 节点代表三条独立的 Standard Workflow，而不是一个包含所有业务的巨大 State Machine：
+The Step Functions node represents three separate Standard workflows, not one giant state machine:
 
-| Workflow                | 责任                                                                 |
-| ----------------------- | -------------------------------------------------------------------- |
-| Underwriting Evaluation | 编排一个 Submission 的证据收集、分析、规则判断和最终 Evaluation 状态 |
-| Document Processing     | 对单份文档执行扫描、OCR、归一化、分类和 Evidence 生成                |
-| Policy Binding          | Quote 被接受后，独立调用 PAS，并处理成功、失败和未知结果             |
+| Workflow                | Responsibility                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| Underwriting Evaluation | Orchestrates evidence collection, analysis, rules, and final Evaluation state for one Submission |
+| Document Processing     | Runs scan, OCR, normalization, classification, and evidence generation for one document          |
+| Policy Binding          | Calls PAS after quote acceptance and handles success, failure, and unknown outcomes              |
 
-Step Functions 负责业务阶段顺序、Timeout、Retry、Catch、并行分支和 Callback Wait，不负责保存最终领域事实。
+Step Functions owns business-stage ordering, timeouts, retries, catches, parallel branches, and callback waits. It does not store final domain facts.
 
-`Submit Application` 不属于 Step Functions：Core API 必须先完成数据库提交，再由 Outbox/EventBridge 启动 Workflow。
+`Submit Application` is not part of Step Functions. Core API must first complete the database commit; only then does Outbox/EventBridge start the workflow.
 
 ### 3.8 SQS + DLQ
 
-Step Functions 不通过 Core API 间接调用 Worker，而是向工作负载专用 SQS Queue 投递类型化 Task Envelope。
+Step Functions does not call Workers indirectly through Core API. It sends typed Task Envelopes to workload-specific SQS queues.
 
-典型 Queue 包括：
+Typical queues:
 
-- Document Processing Queue；
-- AI/RAG Analysis Queue；
-- External Check Queue；
-- Binding Queue。
+- Document Processing Queue;
+- AI/RAG Analysis Queue;
+- External Check Queue;
+- Binding Queue.
 
-每类 Queue 都有对应 DLQ，并拥有独立的：
+Each queue has its own DLQ and independent:
 
-- Visibility Timeout；
-- Retry 和 Redrive Policy；
-- Concurrency Limit；
-- Scaling Policy；
-- IAM Permission；
-- Payload Schema 与版本。
+- visibility timeout;
+- retry and redrive policy;
+- concurrency limit;
+- scaling policy;
+- IAM permissions;
+- payload schema and version.
 
-Task Envelope 只传递 ID、版本、租户上下文、Correlation ID、Trace Context 和 Task Token 等控制信息。大型文档或模型结果通过 S3 Reference 传递，不能直接放入消息。
+The Task Envelope carries only control information such as IDs, versions, tenant context, correlation ID, trace context, and Task Token. Large documents or model results are passed by S3 reference, not directly inside the message.
 
-### 3.9 ECS Fargate — Worker Fleet
+### 3.9 ECS Fargate - Worker Fleet
 
-Worker Fleet 是与 Core API 分开部署和扩缩容的异步计算平面。图中将多个 Worker Workload 汇总在一个节点：
+The Worker Fleet is the asynchronous compute plane, deployed and scaled separately from Core API. The diagram summarizes multiple worker workloads in one node:
 
-- Document Worker；
-- AI/RAG Worker；
-- External Integration Worker；
-- Policy Binding Worker；
-- Outbox Relay Worker。
+- Document Worker;
+- AI/RAG Worker;
+- External Integration Worker;
+- Policy Binding Worker;
+- Outbox Relay Worker.
 
-一次 Callback Task 的正确执行顺序是：
+The correct execution order for one callback task is:
 
-1. 从专用 SQS Queue 取得类型化 Task；
-2. 使用业务幂等键检查任务是否已经完成；
-3. 调用 AWS 托管服务或外部 Provider；
-4. 将业务结果持久化到 Aurora，并将大型 Artifact 写入 S3；
-5. 完成数据库事务；
-6. 使用 Callback Task Token 通知 Step Functions 成功或失败；
-7. 删除 SQS Message。
+1. read a typed task from the dedicated SQS queue;
+2. check with a business idempotency key whether the task is already complete;
+3. call AWS managed services or external providers;
+4. persist business results to Aurora and write large artifacts to S3;
+5. commit the database transaction;
+6. notify Step Functions success or failure with the Callback Task Token;
+7. delete the SQS message.
 
-关键约束是 **persist first, callback second**。如果 Worker 在持久化后、Callback 前崩溃，重试必须读取已有结果并安全地重新 Callback，不能重复产生业务副作用。
+The key constraint is **persist first, callback second**. If a Worker crashes after persisting but before callback, the retry must read the existing result and safely callback again without producing duplicate business effects.
 
-### 3.10 AI & Retrieval
+### 3.10 AI and Retrieval
 
-该区域包含三个受控能力：
+This area contains three controlled capabilities:
 
-| 服务              | 责任                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------- |
-| Amazon Textract   | 从批准的文档中提取文字、表格和结构化字段                                                 |
-| Amazon OpenSearch | 保存经过批准、按版本发布的 Knowledge Base Vector Index，支持受 Tenant/Product 约束的检索 |
-| Amazon Bedrock    | 根据 Risk Snapshot、Evidence、规则上下文和引用材料生成结构化核保建议                     |
+| Service           | Responsibility                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| Amazon Textract   | Extracts text, tables, and structured fields from approved documents                                            |
+| Amazon OpenSearch | Stores approved, versioned Knowledge Base vector indexes with Tenant/Product-scoped retrieval                   |
+| Amazon Bedrock    | Produces structured underwriting recommendations from Risk Snapshot, Evidence, rule context, and cited material |
 
-这个方框表示通过 VPC Endpoint 私有访问的一组托管服务，不应理解为 Bedrock 和 Textract实际运行在客户 VPC Subnet 中。
+This box represents a set of managed services accessed privately through VPC Endpoints. It should not be read as Bedrock and Textract literally running inside customer VPC subnets.
 
-AI 的输出是 Evidence-backed Recommendation，不是最终业务决定。它必须包含：
+AI output is an evidence-backed recommendation, not a final business decision. It must include:
 
-- 固定 JSON Schema；
-- Evidence Citation；
-- Model、Prompt、Knowledge Base 和 Policy Version；
-- Confidence、Uncertainty 和 Missing Information；
-- Safety 和 Schema Validation 结果。
+- fixed JSON Schema;
+- Evidence Citations;
+- Model, Prompt, Knowledge Base, and Policy Version;
+- Confidence, Uncertainty, and Missing Information;
+- Safety and Schema Validation results.
 
-AI 无权自行修改 Submission、决定最终价格、批准风险、拒保或绑定保单。确定性 Eligibility、Pricing、Authority Rule 和 Human Underwriter 保留最终业务权力。
+AI cannot modify a Submission, decide final price, approve a risk, decline coverage, or bind a policy. Deterministic Eligibility, Pricing, Authority Rules, and Human Underwriters retain final business authority.
 
-## 4. 一次 Submission 的端到端运行时序
+## 4. End-to-End Runtime Sequence for One Submission
 
-### 4.1 登录和前端加载
+### 4.1 Login and Frontend Load
 
-1. 用户通过 Route 53 访问对应 Portal 域名；
-2. WAF 和 Shield 保护 CloudFront Distribution；
-3. CloudFront 从应用专属 S3 Origin 返回 SPA；
-4. 用户通过 Cognito 或企业 SAML/OIDC IdP 登录；
-5. 浏览器获得 Access Token，并在 API 请求中携带 JWT。
+1. The user visits the relevant portal domain through Route 53.
+2. WAF and Shield protect the CloudFront distribution.
+3. CloudFront returns the SPA from the application-specific S3 origin.
+4. The user signs in through Cognito or an enterprise SAML/OIDC IdP.
+5. The browser receives an Access Token and includes the JWT in API requests.
 
-### 4.2 提交业务事务
+### 4.2 Submit Business Transaction
 
-1. 浏览器调用 Regional REST API；
-2. API Gateway 验证 JWT；
-3. API Gateway 通过 VPC Link 和 Internal ALB 调用 Core API；
-4. Core API 执行 Tenant Authorization、Schema Validation、Domain Validation 和 Idempotency Check；
-5. Core API 在 Aurora 的同一事务中写入 Submission、Evaluation 和 Outbox Event；
-6. Core API 返回 `202 Accepted`、Submission ID、Evaluation ID 和可查询状态地址。
+1. The browser calls the Regional REST API.
+2. API Gateway validates the JWT.
+3. API Gateway calls Core API through VPC Link and the internal ALB.
+4. Core API performs tenant authorization, schema validation, domain validation, and idempotency checks.
+5. Core API writes Submission, Evaluation, and Outbox Event in the same Aurora transaction.
+6. Core API returns `202 Accepted`, Submission ID, Evaluation ID, and a status URL.
 
-### 4.3 启动 Workflow
+### 4.3 Start Workflow
 
-1. Outbox Relay 读取已提交的 Outbox Event；
-2. Outbox Relay 将 Domain Event 发布到 EventBridge；
-3. EventBridge 根据事件类型启动对应的 Step Functions Standard Workflow；
-4. Notification 等非关键消费者异步接收同一事件，但不阻塞 Workflow。
+1. Outbox Relay reads the committed Outbox Event.
+2. Outbox Relay publishes the Domain Event to EventBridge.
+3. EventBridge starts the matching Step Functions Standard workflow based on event type.
+4. Non-critical consumers such as notifications receive the same event asynchronously and do not block the workflow.
 
-### 4.4 执行异步分析
+### 4.4 Run Asynchronous Analysis
 
-1. Step Functions 将类型化 Task 和 Callback Task Token 投递到专用 SQS Queue；
-2. 对应 Worker 消费任务；
-3. Document Worker 调用 Textract 并写入 Document Artifact 和 Evidence；
-4. External Worker 查询 Registry、Claims、Fraud 和 Compliance Provider；
-5. AI/RAG Worker 从 OpenSearch 检索批准的 Knowledge，并调用 Bedrock；
-6. Worker 将结果持久化到 Aurora/S3；
-7. Worker 使用 Task Token Callback Step Functions；
-8. Step Functions 聚合各分支状态，并进入下一个核保阶段。
+1. Step Functions sends a typed Task and Callback Task Token to a dedicated SQS queue.
+2. The matching Worker consumes the task.
+3. Document Worker calls Textract and writes document artifacts and evidence.
+4. External Worker queries registry, claims, fraud, and compliance providers.
+5. AI/RAG Worker retrieves approved knowledge from OpenSearch and calls Bedrock.
+6. The Worker persists results to Aurora/S3.
+7. The Worker callbacks Step Functions with the Task Token.
+8. Step Functions aggregates branch state and moves to the next underwriting stage.
 
-### 4.5 决策、进度和 Binding
+### 4.5 Decision, Progress, and Binding
 
-1. 确定性 Rule、Pricing 和 Authority Gate 使用已持久化 Evidence 执行；
-2. 满足自动报价的 Case 生成不可变 Quote Version；
-3. 存在不确定性、权限越界或规则要求时进入 Human Review；
-4. 缺失信息时进入 RFI；Broker 补件后创建新的 Submission 和 Evaluation，而不是在旧 Evaluation 中无限循环；
-5. Workflow 进度通过 WebSocket API 推送给前端；
-6. Broker 接受明确的 Quote Version 后启动独立 Binding Workflow；
-7. Binding Worker 使用幂等请求调用 PAS；
-8. PAS 成功后记录 Policy；结果未知时进入 Operational Hold 并执行 Reconciliation。
+1. Deterministic rules, pricing, and authority gates run against persisted evidence.
+2. Cases that satisfy auto-quote conditions generate an immutable Quote Version.
+3. Uncertainty, exceeded authority, or rule requirements route the case to Human Review.
+4. Missing information routes the case to RFI. Broker supplements create a new Submission and Evaluation instead of looping forever in the old Evaluation.
+5. Workflow progress is pushed to the frontend through WebSocket API.
+6. When the Broker accepts a specific Quote Version, an independent Binding workflow starts.
+7. Binding Worker calls PAS with an idempotent request.
+8. PAS success records a Policy. Unknown outcomes enter Operational Hold and reconciliation.
 
-图中没有展开 Rule Engine、Pricing、Authority Gate、Human Review 和 Quote Version 节点，它们被 Core API 与 Underwriting Evaluation 的业务阶段抽象覆盖。
+The diagram does not expand Rule Engine, Pricing, Authority Gate, Human Review, or Quote Version nodes; they are represented by Core API and Underwriting Evaluation business stages.
 
-## 5. 实线与虚线的语义
+## 5. Solid and Dashed Line Semantics
 
-| 线型          | 含义                                       | 示例                                                            |
-| ------------- | ------------------------------------------ | --------------------------------------------------------------- |
-| 实线          | 核心运行请求、命令或必需的数据流           | Browser → API Gateway → Core API；Step Functions → SQS → Worker |
-| 虚线          | 异步、支持性或不在关键路径上的流量         | EventBridge → Notification Channels                             |
-| Callback 回线 | Worker 完成持久化后恢复正在等待的 Workflow | Worker → Step Functions Task Token Callback                     |
+| Line type     | Meaning                                                | Example                                                             |
+| ------------- | ------------------------------------------------------ | ------------------------------------------------------------------- |
+| Solid line    | Core runtime request, command, or required data flow   | Browser -> API Gateway -> Core API; Step Functions -> SQS -> Worker |
+| Dashed line   | Asynchronous, supporting, or non-critical-path traffic | EventBridge -> Notification Channels                                |
+| Callback line | Worker resumes a waiting workflow after persistence    | Worker -> Step Functions Task Token Callback                        |
 
-WebSocket 只用于进度通知。即使 WebSocket 推送失败，业务 Workflow 仍然继续，最终状态仍可从 Core API 查询。
+WebSocket is only for progress notification. Even if WebSocket delivery fails, the business workflow continues and final state remains queryable from Core API.
 
-## 6. 必须保持的架构不变量
+## 6. Required Architecture Invariants
 
-### 6.1 持久化先于编排
+### 6.1 Persistence Before Orchestration
 
-Core API 必须先提交不可变 Submission 和 Outbox Event，然后才能启动 Workflow。Workflow 不能依赖尚未提交的数据。
+Core API must commit the immutable Submission and Outbox Event before any workflow starts. Workflows must not depend on uncommitted data.
 
-### 6.2 业务状态和事件原子提交
+### 6.2 Atomic Business State and Event Commit
 
-业务记录和 Outbox Event 必须处于同一 Aurora Transaction，避免数据库和消息系统之间的 Dual Write 问题。
+Business records and Outbox Events must be committed in the same Aurora transaction to avoid dual-write gaps between the database and messaging system.
 
-### 6.3 Worker 先保存结果再 Callback
+### 6.3 Worker Persists Before Callback
 
-Worker 必须先将结果持久化到 Aurora/S3，再使用 Task Token 恢复 Step Functions，防止 Workflow 显示成功但业务结果不存在。
+Workers must persist results to Aurora/S3 before using the Task Token to resume Step Functions. This prevents a workflow from reporting success while the business result is missing.
 
-### 6.4 所有异步消费者都必须幂等
+### 6.4 All Asynchronous Consumers Are Idempotent
 
-SQS、EventBridge、Callback 重试和外部 API Timeout 都可能导致重复执行。幂等性记录必须位于持久化存储中，不能仅存在于 Worker 内存。
+SQS, EventBridge, callback retries, and external API timeouts may all cause duplicate execution. Idempotency records must live in durable storage, not only in Worker memory.
 
-### 6.5 Core API 不作为内部 HTTP 跳板
+### 6.5 Core API Is Not an Internal HTTP Relay
 
-Step Functions 通过 Queue 与 Worker 交互。Core API 保持用户命令、查询和领域事务边界，不代理 Workflow 的内部步骤。
+Step Functions interact with Workers through queues. Core API remains the boundary for user commands, queries, and domain transactions. It does not proxy internal workflow steps.
 
-### 6.6 AI 只提供受约束建议
+### 6.6 AI Only Produces Constrained Recommendations
 
-AI 输出必须有 Evidence 和版本信息。最终 Eligibility、Pricing、Authority、Decline Review 和 Binding 权限由确定性规则及授权人员控制。
+AI outputs require evidence and version metadata. Final eligibility, pricing, authority, decline review, and binding authority remain controlled by deterministic rules and authorized people.
 
-### 6.7 通知不阻塞核保
+### 6.7 Notifications Do Not Block Underwriting
 
-Email、SMS、Webhook、Analytics 和 SIEM Export 使用 EventBridge 异步处理，不进入 Underwriting Evaluation 的关键成功路径。
+Email, SMS, webhooks, analytics, and SIEM export are processed asynchronously through EventBridge and do not sit on the critical success path of Underwriting Evaluation.
 
-## 7. 这张图有意省略的内容
+## 7. Intentionally Omitted from This Diagram
 
-为保持 Core Underwriting Path 可读，下列内容需要在其他架构图或文档中描述：
+To keep the Core Underwriting Path readable, the following topics belong in other architecture views or documents.
 
-### Security & Governance View
+### Security and Governance View
 
-- AWS Organizations、Account Boundary 和 SCP；
-- IAM、KMS、Secrets Manager 和 Certificate Management；
-- GuardDuty、Security Hub、AWS Config 和 CloudTrail；
-- Application Audit 与 Infrastructure Audit 的边界；
-- Data Classification、Retention 和 Legal Hold。
+- AWS Organizations, account boundaries, and SCPs;
+- IAM, KMS, Secrets Manager, and certificate management;
+- GuardDuty, Security Hub, AWS Config, and CloudTrail;
+- the boundary between Application Audit and Infrastructure Audit;
+- data classification, retention, and legal hold.
 
 ### Delivery View
 
-- GitHub Actions OIDC；
-- CDK Pipeline；
-- ECR Image Signing 和 Vulnerability Scanning；
-- Core API Blue/Green、Worker Rolling 和 Frontend Canary；
-- Step Functions Version/Alias；
-- Database Expand/Backfill/Contract；
-- AppConfig Feature Flag 和 AI Shadow Release。
+- GitHub Actions OIDC;
+- CDK pipeline;
+- ECR image signing and vulnerability scanning;
+- Core API blue/green, Worker rolling deploy, and frontend canary;
+- Step Functions Version/Alias;
+- database expand/backfill/contract;
+- AppConfig feature flags and AI shadow releases.
 
 ### Multi-Region DR View
 
-- Sydney Primary 与 Melbourne Warm Standby；
-- Aurora Global Database；
-- S3 Cross-Region Replication；
-- OpenSearch Index Rebuild；
-- Cognito Singapore MRR；
-- Route 53 Failover；
-- RPO、RTO、Failover Runbook 和恢复演练。
+- Sydney primary and Melbourne warm standby;
+- Aurora Global Database;
+- S3 cross-region replication;
+- OpenSearch index rebuild;
+- Cognito Singapore MRR;
+- Route 53 failover;
+- RPO, RTO, failover runbook, and recovery drills.
 
-## 8. 面试讲解主线
+## 8. Interview Narrative
 
-可以按照以下顺序讲解这张图：
+Use this order when presenting the diagram:
 
-1. **先说明范围**：这是一张 Sydney 三 AZ 的单次核保 Runtime View，不是所有 AWS 服务总图；
-2. **说明同步路径**：浏览器经过 Edge、Cognito、API Gateway、VPC Link 和 ALB 到 Core API；
-3. **说明事务边界**：Core API 在 Aurora 中原子写入 Submission 和 Outbox；
-4. **说明异步解耦**：Outbox Relay → EventBridge → Step Functions → 专用 SQS → Worker；
-5. **说明可靠回调**：Worker 先持久化，再通过 Task Token Callback；
-6. **说明 AI 边界**：Textract、OpenSearch、Bedrock提供 Evidence 和 Recommendation，不能直接做最终决定；
-7. **说明外部副作用**：Policy Binding 独立、幂等，并处理未知结果；
-8. **最后说明省略项**：Security、Delivery 和 DR 有独立视图，避免污染核心业务路径。
+1. **Define the scope**: this is a single-underwriting-request Runtime View across three Sydney AZs, not a map of every AWS service.
+2. **Explain the synchronous path**: browser -> Edge -> Cognito -> API Gateway -> VPC Link -> ALB -> Core API.
+3. **Explain the transaction boundary**: Core API atomically writes Submission and Outbox in Aurora.
+4. **Explain asynchronous decoupling**: Outbox Relay -> EventBridge -> Step Functions -> dedicated SQS -> Worker.
+5. **Explain reliable callback**: Worker persists first, then callbacks with the Task Token.
+6. **Explain the AI boundary**: Textract, OpenSearch, and Bedrock provide evidence and recommendations; they cannot make final decisions.
+7. **Explain external side effects**: Policy Binding is independent, idempotent, and handles unknown outcomes.
+8. **Close with omitted views**: Security, Delivery, and DR have separate diagrams so they do not obscure the core business path.
 
-一句话总结：
+One-sentence summary:
 
-> Prism 将强一致的核保业务不变量保留在 Core API 和 Aurora 中，将耗时、易失败且需要独立扩缩容的文档、AI 和外部集成工作隔离到 Step Functions、SQS 和 Worker，并通过持久化优先、Outbox、幂等和 Callback Token 保证生产可靠性。
+> Prism keeps strongly consistent underwriting invariants inside Core API and Aurora, isolates slow and failure-prone document, AI, and external integration work in Step Functions, SQS, and Workers, and achieves production reliability through persistence-first execution, Transactional Outbox, idempotency, and Callback Tokens.
