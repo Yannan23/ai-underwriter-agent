@@ -1,0 +1,99 @@
+---
+title: Prism AI Underwriter — Minimal Interview Architecture
+config:
+  layout: elk
+---
+%%{init: {"theme":"base","flowchart":{"curve":"basis","htmlLabels":true,"nodeSpacing":30,"rankSpacing":50},"themeVariables":{"fontFamily":"Inter, Arial, sans-serif","fontSize":"14px","primaryColor":"#EEF4FF","primaryTextColor":"#172033","primaryBorderColor":"#5790FF","lineColor":"#68758A","secondaryColor":"#EBF9F3","tertiaryColor":"#FFF7E7","clusterBkg":"#FFFFFF","clusterBorder":"#CBD5E1"}}}%%
+flowchart TB
+
+    %% Interview story: entry -> durable analysis -> deterministic decision -> bind
+    Users["Broker · Underwriter · Admin"] --> FE["FE<br/>REST · upload · realtime"]
+    FE --> Entry["Edge + Identity<br/>CDN / WAF · OAuth/OIDC · API Gateway"]
+    Entry --> Core["Core API<br/>modular monolith<br/>AuthZ · validation · domain policies"]
+
+    Core -->|immutable submission<br/>+ evaluation ID| Orchestrator
+
+    subgraph ANALYSIS["DURABLE, BOUNDED ANALYSIS"]
+        direction TB
+        Orchestrator["EventBridge → Step Functions → SQS / DLQ<br/>versioned workflow · retries · timeout · callback"]
+
+        subgraph TASKS["Parallel typed tasks"]
+            direction LR
+            Documents["Document Processing<br/>scan · OCR · evidence · conflicts"]
+            External["External Checks<br/>registry · claims · compliance"]
+            AI["Controlled AI Underwriter<br/>read-only tools · RAG citations<br/>schema + safety validation"]
+            Policies["Rules + Pricing<br/>deterministic eligibility · premium · authority"]
+        end
+
+        Orchestrator --> Documents
+        Orchestrator --> External
+        Orchestrator --> AI
+        Orchestrator --> Policies
+    end
+
+    Documents --> Gate
+    External --> Gate
+    AI --> Gate
+    Policies --> Gate
+
+    Gate["Deterministic Decision + Authority Gate<br/>AI cannot approve, price or bind"]
+
+    Gate -->|all gates pass| AutoQuote["AUTO_QUOTE"]
+    Gate -->|uncertainty / authority| Human["HUMAN REVIEW<br/>override reason · maker-checker"]
+    Gate -->|missing info / dependency| RFI["RFI / OPERATIONAL HOLD"]
+
+    AutoQuote --> Quote["Immutable Quote Version"]
+    Human --> Quote
+    Quote --> Accept["Exact Quote Acceptance"]
+    Accept --> Binding["Independent Binding Workflow<br/>idempotent request · reconcile unknown outcome"]
+    RFI -. "new information → new immutable version" .-> Core
+
+    subgraph DATA["BUSINESS DATA & APPROVED KNOWLEDGE"]
+        direction LR
+        Aurora[("Aurora PostgreSQL<br/>business source of truth")]
+        S3[("S3<br/>quarantine · originals · artifacts")]
+        Search[("OpenSearch<br/>approved versioned KB index")]
+    end
+
+    Core --> Aurora
+    Documents --> S3
+    AI -. "tenant/product-scoped retrieval" .-> Search
+
+    subgraph SERVICES["APPROVED SERVICES"]
+        direction LR
+        Models["Bedrock Models<br/>pinned model / prompt policy"]
+        Providers["Registry / Claims / Compliance"]
+        PAS["Policy Administration System"]
+    end
+
+    AI --> Models
+    External --> Providers
+    Binding --> PAS
+
+    Controls["PRODUCTION GUARANTEES<br/>Immutable versions · Outbox + idempotency · IAM/KMS/RLS · audit + telemetry<br/>Multi-AZ + warm standby · RPO ≤ 5 min · RTO ≤ 1 hour"]
+    Controls -. applies to .-> Core
+    Controls -. applies to .-> Orchestrator
+    Controls -. applies to .-> Aurora
+
+    Interview["INTERVIEW ANCHOR<br/>Keep transactional invariants in the modular monolith;<br/>isolate slow and failure-prone work with managed workflows."]
+    Interview -. rationale .-> Core
+
+    classDef actor fill:#F7F9FC,stroke:#94A3B8,color:#172033,stroke-width:1.4px;
+    classDef edge fill:#EEF4FF,stroke:#5790FF,color:#172033,stroke-width:1.5px;
+    classDef core fill:#EBF9F3,stroke:#4AB58D,color:#123B2A,stroke-width:1.7px;
+    classDef workflow fill:#FFF7E7,stroke:#DBA343,color:#513509,stroke-width:1.5px;
+    classDef ai fill:#FFF0F5,stroke:#DF6C98,color:#7A2146,stroke-width:1.8px;
+    classDef data fill:#F5F0FF,stroke:#9B7BE8,color:#35145F,stroke-width:1.5px;
+    classDef external fill:#F7F9FC,stroke:#94A3B8,color:#172033,stroke-width:1.4px;
+    classDef control fill:#172033,stroke:#172033,color:#FFFFFF,stroke-width:1.5px;
+    classDef decision fill:#EBF9F3,stroke:#138A65,color:#123B2A,stroke-width:2px;
+
+    class Users actor;
+    class FE,Entry,AutoQuote,Quote,Accept,Binding edge;
+    class Core,Policies core;
+    class Orchestrator,Documents,External,Human,RFI workflow;
+    class AI ai;
+    class Gate decision;
+    class Aurora,S3,Search data;
+    class Models,Providers,PAS external;
+    class Controls,Interview control;

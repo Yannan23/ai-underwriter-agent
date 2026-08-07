@@ -8,6 +8,18 @@ Straightforward, in-appetite applications are quoted in **under 2 minutes** with
 
 > 📄 Full product spec: [prism-ai-underwriter-prd.md](./prism-ai-underwriter-prd.md)
 
+## Architecture docs
+
+The stack described later in this README is the **current demo implementation**. The reviewed production target is documented separately and intentionally introduces stronger workflow, data, tenant-isolation, release, and disaster-recovery boundaries:
+
+- [Production architecture](./docs/architecture.md)
+- [Mermaid architecture diagram collection](./docs/architecture-diagrams.md)
+- [Production deployment and release architecture](./docs/deployment-architecture.md)
+- [Backend internal component architecture](./docs/backend-architecture.md)
+- [Frontend internal component architecture](./docs/frontend-architecture.md)
+
+The target documents are design decisions, not a claim that every AWS component has already been implemented in this repository.
+
 ## Why
 
 PI underwriting today is a manual, multi-day process: a broker emails a proposal form, an underwriter re-keys the data, checks appetite, reads the underwriting manual, rates the premium in a spreadsheet, and issues a quote. For standard SME risks, most of that work is mechanical — yet every submission waits in the same queue as complex risks.

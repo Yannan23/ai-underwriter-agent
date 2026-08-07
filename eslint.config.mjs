@@ -113,8 +113,13 @@ export default defineConfig(
     },
   },
   {
+    // Plain JS cannot carry TypeScript return-type annotations at runtime.
     files: ['**/*.mjs', '**/*.js'],
     ...tseslint.disableTypeChecked,
+    rules: {
+      ...tseslint.disableTypeChecked.rules,
+      '@typescript-eslint/explicit-function-return-type': 'off',
+    },
   },
   prettier
 )

@@ -1,0 +1,177 @@
+---
+title: Prism AI Underwriter Agent — Production Architecture
+---
+%%{init: {"theme":"base","flowchart":{"curve":"basis","htmlLabels":true,"nodeSpacing":28,"rankSpacing":48},"themeVariables":{"fontFamily":"Inter, Arial, sans-serif","fontSize":"14px","primaryColor":"#E8F1FF","primaryTextColor":"#10233F","primaryBorderColor":"#3973B9","lineColor":"#60758C","secondaryColor":"#EAF8F1","tertiaryColor":"#FFF5DE","clusterBkg":"#F8FAFC","clusterBorder":"#94A3B8"}}}%%
+flowchart TB
+    subgraph USERS["USERS & BUSINESS ACTORS"]
+        Broker["Broker User"]
+        Underwriter["Human Underwriter"]
+        Administrator["Product / Risk Admin"]
+        Operator["Platform / Security Operator"]
+    end
+
+    subgraph GLOBAL["GLOBAL EDGE & IDENTITY"]
+        BrokerUI["Broker Portal<br/>CloudFront + WAF + private S3"]
+        UWUI["Underwriter Workbench<br/>CloudFront + WAF + private S3"]
+        AdminUI["Admin Console<br/>CloudFront + WAF + private S3"]
+        DNS["Route 53 + ARC<br/>controlled failover"]
+        REST["Regional API Gateway<br/>REST API + WAF"]
+        WS["API Gateway<br/>WebSocket + WAF"]
+        BrokerId["Broker Cognito Pool"]
+        WorkforceId["Workforce Cognito Pool<br/>Enterprise federation"]
+    end
+
+    subgraph SYDNEY["PRIMARY — SYDNEY ap-southeast-2 — 3 AZ"]
+        subgraph VPC["PRODUCTION VPC"]
+            subgraph INGRESS["PRIVATE INGRESS"]
+                Link["VPC Link V2"]
+                ALB["Internal ALB<br/>HTTPS"]
+            end
+
+            subgraph APP["PRIVATE APPLICATION SUBNETS"]
+                Core["Core API<br/>ECS Fargate modular monolith<br/>Broker / Underwriter / Admin BFF routes"]
+                Realtime["Realtime Lambda adapters<br/>DynamoDB TTL registry"]
+                Outbox["Transactional<br/>Outbox Publisher"]
+                DocWorkers["Document Scan +<br/>Processing Workers"]
+                AIWorker["Controlled AI<br/>Underwriter Worker"]
+                ExternalWorkers["External Check<br/>Workers"]
+                BindingWorker["Policy Binding<br/>Worker"]
+            end
+
+            subgraph DATA["ISOLATED DATA SUBNETS"]
+                Proxy["RDS Proxy"]
+                Aurora[("Aurora PostgreSQL<br/>Writer + 2 Readers<br/>business source of truth")]
+                Search[("OpenSearch Serverless<br/>approved KB releases")]
+            end
+
+            Egress["Controlled Egress<br/>Network Firewall / Proxy"]
+            Endpoints["VPC Endpoints<br/>S3 · ECR · KMS · Secrets · SQS · SFN · Bedrock"]
+        end
+
+        subgraph ASYNC["MANAGED ORCHESTRATION & MESSAGING"]
+            EventBridge["EventBridge"]
+            Starter["Idempotent<br/>Workflow Starter"]
+            DocSF["Document Processing<br/>Step Functions Standard"]
+            EvalSF["Underwriting Evaluation<br/>Step Functions Standard"]
+            BindSF["Policy Binding<br/>Step Functions Standard"]
+            Queues["Workload-specific<br/>Standard SQS + DLQs"]
+        end
+
+        S3[("S3 Security Domains<br/>quarantine · originals · artifacts · audit")]
+    end
+
+    subgraph AI_EXTERNAL["AI & EXTERNAL SYSTEMS"]
+        Models["Approved Bedrock Models<br/>versioned routing policy"]
+        Providers["Registry / Claims /<br/>Compliance Providers"]
+        PAS["Policy Administration<br/>System"]
+    end
+
+    subgraph RECOVERY["WARM STANDBY — MELBOURNE ap-southeast-4 — ≥2 AZ"]
+        MelAPI["Regional REST + WebSocket"]
+        MelCompute["Warm Core API / Workers<br/>Workflow definitions"]
+        MelAurora[("Aurora Global Secondary")]
+        MelS3[("Replicated S3")]
+        MelSearch[("Prebuilt OpenSearch indexes")]
+        Recovery["Checkpoint-based<br/>Workflow Recovery"]
+    end
+
+    subgraph IDENTITY_DR["IDENTITY DR — SINGAPORE ap-southeast-1"]
+        IdentityReplica["Cognito MRR<br/>read-only replica"]
+    end
+
+    subgraph GOVERNANCE["SECURITY, DELIVERY & OPERATIONS"]
+        GitHub["GitHub Actions OIDC<br/>Build once / promote same digest"]
+        Registry["Shared Services<br/>ECR + signed release manifests"]
+        Security["Security Account<br/>GuardDuty · Security Hub · Config"]
+        Logs["Log Archive<br/>CloudTrail · immutable S3"]
+        Observe["ADOT · CloudWatch · X-Ray<br/>SLOs · alarms · runbooks"]
+    end
+
+    Broker --> BrokerUI
+    Underwriter --> UWUI
+    Administrator --> AdminUI
+    Operator --> Observe
+
+    Broker --> BrokerId
+    Underwriter --> WorkforceId
+    Administrator --> WorkforceId
+    BrokerUI --> REST
+    UWUI --> REST
+    AdminUI --> REST
+    BrokerUI -. status notifications .-> WS
+    UWUI -. status notifications .-> WS
+    AdminUI -. status notifications .-> WS
+    BrokerId -. JWT .-> REST
+    WorkforceId -. JWT .-> REST
+    DNS --> REST
+    DNS --> WS
+
+    REST --> Link --> ALB --> Core
+    WS --> Realtime
+    Core --> Proxy --> Aurora
+    Core --> S3
+    Aurora --> Outbox --> EventBridge
+    EventBridge --> Starter
+    EventBridge --> Realtime
+    Starter --> DocSF
+    Starter --> EvalSF
+    Starter --> BindSF
+    DocSF --> Queues
+    EvalSF --> Queues
+    BindSF --> Queues
+    Queues --> DocWorkers
+    Queues --> AIWorker
+    Queues --> ExternalWorkers
+    Queues --> BindingWorker
+
+    DocWorkers --> S3
+    DocWorkers --> Proxy
+    AIWorker --> Proxy
+    ExternalWorkers --> Proxy
+    BindingWorker --> Proxy
+    AIWorker --> Search
+    AIWorker --> Models
+    ExternalWorkers --> Egress --> Providers
+    BindingWorker --> Egress --> PAS
+    Core --> Endpoints
+    AIWorker --> Endpoints
+    DocWorkers -. persist result then callback .-> DocSF
+    AIWorker -. persist result then callback .-> EvalSF
+    ExternalWorkers -. persist result then callback .-> EvalSF
+    BindingWorker -. persist result then callback .-> BindSF
+
+    Aurora -. "Aurora Global<br/>RPO ≤ 5 min" .-> MelAurora
+    S3 -. "Cross-Region Replication" .-> MelS3
+    S3 -. "immutable KB artifacts" .-> MelSearch
+    BrokerId -. "Cognito MRR" .-> IdentityReplica
+    WorkforceId -. "Cognito MRR" .-> IdentityReplica
+    DNS -. "IC-authorized failover<br/>RTO ≤ 1 hour" .-> MelAPI
+    MelAPI --> MelCompute
+    MelCompute --> MelAurora
+    MelCompute --> MelS3
+    MelCompute --> MelSearch
+    MelAurora --> Recovery --> MelCompute
+
+    GitHub --> Registry
+    Registry -. immutable release .-> Core
+    Registry -. immutable release .-> MelCompute
+    Security -. findings .-> Observe
+    Core -. telemetry .-> Observe
+    AIWorker -. telemetry .-> Observe
+    EventBridge -. audit and security events .-> Logs
+
+    classDef actor fill:#F1F5F9,stroke:#475569,color:#0F172A,stroke-width:1.5px;
+    classDef edge fill:#E8F1FF,stroke:#3973B9,color:#10233F,stroke-width:1.5px;
+    classDef compute fill:#EAF8F1,stroke:#26835B,color:#123B2A,stroke-width:1.5px;
+    classDef workflow fill:#FFF5DE,stroke:#C28114,color:#513509,stroke-width:1.5px;
+    classDef data fill:#F3E8FF,stroke:#7C3AED,color:#35145F,stroke-width:1.5px;
+    classDef external fill:#FFF1F2,stroke:#BE4758,color:#5B1721,stroke-width:1.5px;
+    classDef ops fill:#ECFEFF,stroke:#0E7490,color:#164E63,stroke-width:1.5px;
+
+    class Broker,Underwriter,Administrator,Operator actor;
+    class BrokerUI,UWUI,AdminUI,DNS,REST,WS,BrokerId,WorkforceId,MelAPI,IdentityReplica edge;
+    class Link,ALB,Core,Realtime,Outbox,DocWorkers,AIWorker,ExternalWorkers,BindingWorker,MelCompute,Recovery compute;
+    class EventBridge,Starter,DocSF,EvalSF,BindSF,Queues workflow;
+    class Proxy,Aurora,Search,S3,MelAurora,MelS3,MelSearch data;
+    class Models,Providers,PAS,Egress external;
+    class GitHub,Registry,Security,Logs,Observe,Endpoints ops;

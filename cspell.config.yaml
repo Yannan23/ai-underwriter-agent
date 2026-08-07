@@ -8,13 +8,16 @@ dictionaries:
 words:
   - commitlint
   - hono
+  - labelledby
   - lookback
   - normalises
   - nvmrc
+  - opensearch
   - pgvector
   - prism
   - rerank
   - resumability
+  - SIEM
   - SOLV
   - supabase
   - tsconfigs

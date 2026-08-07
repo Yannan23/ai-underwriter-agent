@@ -1,0 +1,944 @@
+---
+title: Prism AI Underwriter Agent — Detailed Production Architecture
+config:
+  layout: elk
+---
+%%{init: {"theme":"base","flowchart":{"curve":"basis","htmlLabels":true,"nodeSpacing":24,"rankSpacing":42},"themeVariables":{"fontFamily":"Inter, Arial, sans-serif","fontSize":"13px","primaryColor":"#E8F1FF","primaryTextColor":"#10233F","primaryBorderColor":"#3973B9","lineColor":"#64748B","secondaryColor":"#EAF8F1","tertiaryColor":"#FFF5DE","clusterBkg":"#F8FAFC","clusterBorder":"#94A3B8"}}}%%
+flowchart TB
+
+%% =====================================================================
+%% ACTORS
+%% =====================================================================
+subgraph ACTORS["USERS & EXTERNAL ACTORS"]
+    Broker["Broker User"]
+    Underwriter["Underwriter"]
+    SeniorUW["Senior Underwriter / Approver"]
+    ProductAdmin["Product / Risk Administrator"]
+    PlatformOps["Platform / Security Operator"]
+    ExternalSystems["External Insurance Systems"]
+end
+
+%% =====================================================================
+%% GLOBAL EDGE AND FRONTEND HOSTING
+%% =====================================================================
+subgraph EDGE["GLOBAL EDGE, DNS & FRONTEND HOSTING"]
+    DNS["Route 53 + ARC Routing Controls<br/>health checks and controlled failover"]
+    Shield["AWS Shield Standard"]
+
+    subgraph BROKER_EDGE["Broker Portal — independent deployment"]
+        BrokerCF["CloudFront Distribution"]
+        BrokerWAF["WAF Web ACL<br/>managed rules · rate limits · bot controls"]
+        BrokerHeaders["Response Headers Policy<br/>CSP · HSTS · frame · referrer"]
+        BrokerOAC["Origin Access Control"]
+        BrokerAssets[("Private S3<br/>immutable release prefixes")]
+    end
+
+    subgraph UW_EDGE["Underwriter Workbench — independent deployment"]
+        UWCF["CloudFront Distribution"]
+        UWWAF["WAF Web ACL"]
+        UWHeaders["Response Headers Policy"]
+        UWOAC["Origin Access Control"]
+        UWAssets[("Private S3<br/>immutable release prefixes")]
+    end
+
+    subgraph ADMIN_EDGE["Admin Console — independent deployment"]
+        AdminCF["CloudFront Distribution"]
+        AdminWAF["WAF Web ACL<br/>stricter admin policy"]
+        AdminHeaders["Response Headers Policy"]
+        AdminOAC["Origin Access Control"]
+        AdminAssets[("Private S3<br/>immutable release prefixes")]
+    end
+end
+
+Broker --> DNS
+Underwriter --> DNS
+SeniorUW --> DNS
+ProductAdmin --> DNS
+DNS --> BrokerCF
+DNS --> UWCF
+DNS --> AdminCF
+Shield --> BrokerCF
+Shield --> UWCF
+Shield --> AdminCF
+BrokerWAF -. attached .-> BrokerCF
+BrokerHeaders -. attached .-> BrokerCF
+BrokerCF --> BrokerOAC --> BrokerAssets
+UWWAF -. attached .-> UWCF
+UWHeaders -. attached .-> UWCF
+UWCF --> UWOAC --> UWAssets
+AdminWAF -. attached .-> AdminCF
+AdminHeaders -. attached .-> AdminCF
+AdminCF --> AdminOAC --> AdminAssets
+
+%% =====================================================================
+%% FRONTEND APPLICATIONS
+%% =====================================================================
+subgraph FRONTENDS["FRONTEND MONOREPO — BUILD-TIME SHARING, RUNTIME ISOLATION"]
+    subgraph FE_SHARED["Shared packages"]
+        DesignSystem["Design System<br/>tokens · components · a11y"]
+        GeneratedClient["Generated OpenAPI Client<br/>Problem Details mapping"]
+        AuthPackage["Auth Package<br/>PKCE · session · active context"]
+        DomainTypes["Domain Presentation Types"]
+        FeatureFlags["Typed Feature Flags<br/>owner · expiry · kill switch"]
+        FrontendObs["RUM / Trace / Typed Analytics"]
+        I18n["Internationalisation"]
+        TestKit["Testing Harness / Fixtures"]
+    end
+
+    subgraph BROKER_APP["Broker Portal"]
+        BrokerShell["Application Shell"]
+        BrokerDashboard["Dashboard"]
+        ApplicationDraft["Versioned Application Draft"]
+        DynamicForm["Dynamic Product Form"]
+        Autosave["Debounced Autosave<br/>ETag / If-Match"]
+        DocumentUpload["Multipart Upload Manager<br/>resume · checksum · progress"]
+        BrokerRFI["RFI Questions / Supplements"]
+        EvaluationTimeline["Evaluation Timeline"]
+        QuoteReview["Quote Version Review"]
+        QuoteAcceptanceUI["Idempotent Quote Acceptance"]
+    end
+
+    subgraph UW_APP["Underwriter Workbench"]
+        UWShell["Application Shell"]
+        ReviewQueueUI["Review Queue"]
+        CaseWorkspace["Case Workspace"]
+        EvidenceViewer["PDF / Evidence Viewer<br/>page · section · bounding box"]
+        FactsUI["Validated Facts"]
+        ConflictUI["Missing / Conflicting Evidence"]
+        RulesUI["Eligibility / Rule Results"]
+        AIRiskUI["AI Risk Assertions<br/>supporting and opposing evidence"]
+        PricingUI["Pricing Breakdown"]
+        AuthorityUI["Authority Position"]
+        HumanDecisionUI["Human Assessment / Decision"]
+        AssignmentUI["Assignment / Escalation"]
+        AuditTimeline["Case Audit Timeline"]
+    end
+
+    subgraph ADMIN_APP["Admin Console"]
+        AdminShell["Application Shell"]
+        ProductReleaseUI["Product / Form Release"]
+        RuleReleaseUI["Eligibility Rules Release"]
+        PricingReleaseUI["Pricing Release"]
+        AuthorityConfigUI["Authority Configuration"]
+        ClauseLibraryUI["Approved Clause Library"]
+        ModelPolicyUI["Prompt / Model Policy Release"]
+        KnowledgeReleaseUI["Knowledge Release"]
+        OperationsUI["Workflow / Queue / Provider Operations"]
+        AuditSearchUI["Audit Search / Controlled Export"]
+    end
+
+    subgraph BROWSER_PLATFORM["Common browser runtime"]
+        Router["Route Shell / Lazy Loading"]
+        QueryClient["Server-state Query Cache"]
+        FormRuntime["Form Runtime + Zod"]
+        RealtimeClient["WebSocket Notification Client"]
+        Polling["REST Polling / Full Resync"]
+        UploadClient["Pre-signed S3 Upload Client"]
+        ErrorBoundary["Error Boundaries"]
+        RouteGuard["Permission Presentation Guards"]
+    end
+end
+
+BrokerCF --> BrokerShell
+UWCF --> UWShell
+AdminCF --> AdminShell
+BrokerShell --> BrokerDashboard
+BrokerShell --> ApplicationDraft
+BrokerShell --> DocumentUpload
+BrokerShell --> BrokerRFI
+BrokerShell --> EvaluationTimeline
+BrokerShell --> QuoteReview --> QuoteAcceptanceUI
+ApplicationDraft --> DynamicForm --> Autosave
+UWShell --> ReviewQueueUI --> CaseWorkspace
+CaseWorkspace --> EvidenceViewer
+CaseWorkspace --> FactsUI
+CaseWorkspace --> ConflictUI
+CaseWorkspace --> RulesUI
+CaseWorkspace --> AIRiskUI
+CaseWorkspace --> PricingUI
+CaseWorkspace --> AuthorityUI
+CaseWorkspace --> HumanDecisionUI
+CaseWorkspace --> AssignmentUI
+CaseWorkspace --> AuditTimeline
+AdminShell --> ProductReleaseUI
+AdminShell --> RuleReleaseUI
+AdminShell --> PricingReleaseUI
+AdminShell --> AuthorityConfigUI
+AdminShell --> ClauseLibraryUI
+AdminShell --> ModelPolicyUI
+AdminShell --> KnowledgeReleaseUI
+AdminShell --> OperationsUI
+AdminShell --> AuditSearchUI
+DesignSystem --> BrokerShell
+DesignSystem --> UWShell
+DesignSystem --> AdminShell
+GeneratedClient --> QueryClient
+AuthPackage --> RouteGuard
+FrontendObs --> BrokerShell
+FrontendObs --> UWShell
+FrontendObs --> AdminShell
+Router --> BrokerShell
+Router --> UWShell
+Router --> AdminShell
+FormRuntime --> DynamicForm
+RealtimeClient --> EvaluationTimeline
+RealtimeClient --> CaseWorkspace
+Polling --> EvaluationTimeline
+Polling --> CaseWorkspace
+UploadClient --> DocumentUpload
+ErrorBoundary --> BrokerShell
+ErrorBoundary --> UWShell
+ErrorBoundary --> AdminShell
+
+%% =====================================================================
+%% IDENTITY AND AUTHORIZATION
+%% =====================================================================
+subgraph IDENTITY["IDENTITY, SESSION & APPLICATION AUTHORIZATION"]
+    BrokerPool["Cognito Broker User Pool<br/>native or approved federation"]
+    WorkforcePool["Cognito Workforce User Pool"]
+    CorporateIdP["Tenant / Enterprise IdP<br/>SAML or OIDC"]
+    BrokerClient["Broker SPA App Client<br/>Authorization Code + PKCE"]
+    UWClient["Underwriter SPA App Client"]
+    AdminClient["Admin SPA App Client<br/>step-up authentication"]
+    RESTAuthorizers["Route-group Cognito Authorizers"]
+    RealtimeTicket["One-time short-lived<br/>Realtime Ticket"]
+    MembershipAuthz["Core API authorization<br/>Membership · Appointment · Authority"]
+    OperatorSSO["IAM Identity Center<br/>AWS operators only"]
+end
+
+Broker --> BrokerPool --> BrokerClient
+Underwriter --> CorporateIdP --> WorkforcePool
+SeniorUW --> CorporateIdP
+ProductAdmin --> CorporateIdP
+WorkforcePool --> UWClient
+WorkforcePool --> AdminClient
+BrokerClient --> RESTAuthorizers
+UWClient --> RESTAuthorizers
+AdminClient --> RESTAuthorizers
+PlatformOps --> OperatorSSO
+
+%% =====================================================================
+%% API AND REALTIME EDGE
+%% =====================================================================
+subgraph API_EDGE["API & REALTIME ENTRY"]
+    APIDNS["api.* Route 53 record"]
+    WSDNS["ws.* Route 53 record"]
+    APIWAF["Regional WAF<br/>managed rules · size · rate controls"]
+    RESTAPI["Regional API Gateway REST API"]
+    RequestLimits["Request Size / Throttling / Quotas"]
+    VPCLink["VPC Link V2"]
+    WSAPI["API Gateway WebSocket API"]
+    ConnectLambda["$connect / $disconnect Lambda"]
+    ConnectionRegistry[("DynamoDB TTL<br/>Connection Registry")]
+    RealtimePublisher["Realtime Publisher Lambda"]
+end
+
+DNS --> APIDNS --> APIWAF --> RESTAPI
+DNS --> WSDNS --> WSAPI
+RESTAuthorizers --> RESTAPI
+RESTAPI --> RequestLimits --> VPCLink
+WSAPI --> ConnectLambda --> ConnectionRegistry
+RealtimeTicket --> ConnectLambda
+RealtimePublisher --> ConnectionRegistry
+RealtimePublisher --> WSAPI
+QueryClient --> RESTAPI
+RealtimeClient --> WSAPI
+CoreService --> RealtimeTicket
+
+%% =====================================================================
+%% VPC, NETWORK AND ECS PLATFORM
+%% =====================================================================
+subgraph PROD_VPC["PRODUCTION VPC — SYDNEY — 3 AZ"]
+    subgraph PUBLIC_EGRESS["Public egress subnets"]
+        NAT["NAT Gateway per AZ"]
+    end
+
+    subgraph PRIVATE_INGRESS["Private ingress subnets"]
+        InternalALB["Internal ALB<br/>HTTPS · blue/green target groups"]
+    end
+
+    subgraph PRIVATE_APP["Private application subnets"]
+        ECSCluster["ECS Fargate Cluster"]
+        CoreService["Core API ECS Service<br/>minimum 3 tasks · AZ spread"]
+        DocScanService["Document Scan Worker Service"]
+        DocProcessService["Document Processing Worker Service"]
+        AIWorkerService["AI Underwriter Worker Service"]
+        ExternalWorkerService["Provider-specific External Workers"]
+        BindingWorkerService["Policy Binding Worker Service"]
+        OutboxService["Outbox Publisher Service"]
+    end
+
+    subgraph PRIVATE_INTEGRATION["Private integration subnets"]
+        NetworkFirewall["Network Firewall / Egress Proxy"]
+        Allowlist["Provider Domain / IP Allowlist"]
+    end
+
+    subgraph ISOLATED_DATA["Isolated data subnets"]
+        RDSProxy["RDS Proxy<br/>writer and read-only endpoints"]
+        AuroraPrimary[("Provisioned Aurora PostgreSQL<br/>writer + 2 readers")]
+        OpenSearchEndpoint["OpenSearch Serverless VPC Endpoint"]
+    end
+
+    subgraph ENDPOINTS["AWS private endpoints"]
+        DataEndpoints["S3 · DynamoDB"]
+        RuntimeEndpoints["ECR · Logs · X-Ray · SSM"]
+        SecurityEndpoints["KMS · Secrets Manager · STS"]
+        AsyncEndpoints["SQS · Step Functions · EventBridge"]
+        BedrockEndpoint["Amazon Bedrock Endpoint"]
+    end
+end
+
+VPCLink --> InternalALB --> CoreService
+ECSCluster --> CoreService
+ECSCluster --> DocScanService
+ECSCluster --> DocProcessService
+ECSCluster --> AIWorkerService
+ECSCluster --> ExternalWorkerService
+ECSCluster --> BindingWorkerService
+ECSCluster --> OutboxService
+ExternalWorkerService --> NetworkFirewall --> Allowlist
+BindingWorkerService --> NetworkFirewall
+
+%% =====================================================================
+%% CORE API INTERNALS
+%% =====================================================================
+subgraph CORE["CORE API — TYPESCRIPT MODULAR MONOLITH"]
+    subgraph HTTP_PIPELINE["HTTP request pipeline"]
+        TraceContext["Correlation / Trace Context"]
+        ErrorHandler["Central Error Handler<br/>RFC 9457 Problem Details"]
+        AuthContext["Authentication Context"]
+        ActiveContext["Tenant / Brokerage Active Context"]
+        ResourcePolicy["Resource-level Policy Enforcement"]
+        SchemaValidation["OpenAPI / Schema Validation"]
+        Concurrency["Idempotency-Key / If-Match"]
+    end
+
+    subgraph BFF_ROUTES["Logical BFF route modules — one deployment"]
+        BrokerBFF["/broker/api/v1<br/>draft · upload · submit · RFI · quote"]
+        UnderwriterBFF["/underwriter/api/v1<br/>queue · case · evidence · decision"]
+        AdminBFF["/admin/api/v1<br/>configuration · release · audit · operations"]
+    end
+
+    ApplicationLayer["Application Use Cases<br/>authorization · transaction intent · orchestration"]
+
+    subgraph DOMAIN_MODULES["Domain modules and write ownership"]
+        IdentityModule["Identity Module"]
+        DistributionModule["Distribution Module<br/>brokerage · membership · appointment"]
+        SubmissionModule["Submission Module<br/>application · submission · RFI"]
+        DocumentModule["Document Module<br/>version · extraction · evidence"]
+        UnderwritingModule["Underwriting Module<br/>case · evaluation · review"]
+        PricingModule["Pricing / Quote Module"]
+        BindingModule["Binding Module"]
+        ConfigurationModule["Configuration Module"]
+        PlatformModule["Platform Module<br/>stage · attempt · outbox · idempotency"]
+        AuditModule["Audit Module"]
+    end
+
+    subgraph DOMAIN_POLICIES["Deterministic domain policies"]
+        TransitionPolicy["State Transition Policies"]
+        EligibilityPolicy["Eligibility / Knockout Policy"]
+        ConfidencePolicy["Confidence / Automation Policy"]
+        PricingPolicy["Versioned Pricing Policy"]
+        AuthorityPolicy["Authority Policy"]
+        DecisionPolicy["Deterministic Decision Gate"]
+        QuotePolicy["Quote Validity / Acceptance Policy"]
+        FreshnessPolicy["External Check Freshness Policy"]
+    end
+
+    RepositoryPorts["Owned Repository / Service Ports"]
+    ProjectionQueries["Page-specific Read Projection Queries"]
+end
+
+CoreService --> TraceContext --> ErrorHandler --> AuthContext --> ActiveContext --> ResourcePolicy --> SchemaValidation --> Concurrency
+MembershipAuthz --> ResourcePolicy
+Concurrency --> BrokerBFF
+Concurrency --> UnderwriterBFF
+Concurrency --> AdminBFF
+BrokerBFF --> ApplicationLayer
+UnderwriterBFF --> ApplicationLayer
+AdminBFF --> ApplicationLayer
+UnderwriterBFF --> ProjectionQueries
+BrokerBFF --> ProjectionQueries
+AdminBFF --> ProjectionQueries
+ApplicationLayer --> IdentityModule
+ApplicationLayer --> DistributionModule
+ApplicationLayer --> SubmissionModule
+ApplicationLayer --> DocumentModule
+ApplicationLayer --> UnderwritingModule
+ApplicationLayer --> PricingModule
+ApplicationLayer --> BindingModule
+ApplicationLayer --> ConfigurationModule
+ApplicationLayer --> PlatformModule
+ApplicationLayer --> AuditModule
+ApplicationLayer --> TransitionPolicy
+ApplicationLayer --> EligibilityPolicy
+ApplicationLayer --> ConfidencePolicy
+ApplicationLayer --> PricingPolicy
+ApplicationLayer --> AuthorityPolicy
+ApplicationLayer --> DecisionPolicy
+ApplicationLayer --> QuotePolicy
+ApplicationLayer --> FreshnessPolicy
+ApplicationLayer --> RepositoryPorts
+
+%% =====================================================================
+%% SECURE DOCUMENT INTAKE AND PROCESSING
+%% =====================================================================
+subgraph DOCUMENT_PIPELINE["SECURE DOCUMENT INTAKE & PROCESSING"]
+    UploadSession["Create Upload Session<br/>tenant · application · type · size · expiry"]
+    PresignedUpload["Short-lived Multipart<br/>Pre-signed Upload"]
+    Quarantine[("S3 Document Quarantine")]
+    UploadVerification["Verify Session · Key · Tenant<br/>Size · SHA-256 · Magic Bytes"]
+    UploadCompleted["S3 ObjectCreated technical signal"]
+    ProcessingRequested["DocumentProcessingRequested<br/>validated Outbox event"]
+    MalwareScan["Malware / Active Content Scan<br/>zip bomb · macro · malicious PDF"]
+    RejectDocument["QUARANTINED / REJECTED"]
+    Originals[("S3 Immutable Originals")]
+    DocumentReadyEvent["DocumentVersion READY<br/>Outbox event"]
+    OCRTask["OCR / Layout typed task"]
+    OCRLayout["OCR + Layout Result"]
+    Normalise["Document Normalisation"]
+    FieldCandidates["Typed Field Candidates"]
+    FieldValidation["Zod / Domain Validation"]
+    EvidenceFragments["Evidence Fragments<br/>page · section · bounding box · hash"]
+    Reconciliation["Cross-document Reconciliation"]
+    ConflictDetection["Conflict Detection"]
+    Completeness["Document Completeness Result"]
+end
+
+DocumentUpload --> UploadSession --> PresignedUpload --> Quarantine
+Quarantine --> UploadCompleted --> UploadVerification --> ProcessingRequested
+MalwareScan -->|unsafe| RejectDocument
+MalwareScan -->|safe| Originals
+OCRTask --> OCRLayout --> Normalise --> FieldCandidates --> FieldValidation --> EvidenceFragments --> Reconciliation --> ConflictDetection --> Completeness --> DocumentReadyEvent
+
+%% =====================================================================
+%% OUTBOX, WORKFLOWS, QUEUES AND CALLBACK
+%% =====================================================================
+subgraph ASYNC["DURABLE ORCHESTRATION, EVENTS & CALLBACK WORKERS"]
+    OutboxTable["Aurora Transactional Outbox"]
+    EventBridge["Amazon EventBridge<br/>domain event bus"]
+    WorkflowStarter["Idempotent Workflow Starter Lambda"]
+
+    subgraph WORKFLOWS["Versioned Step Functions Standard workflows"]
+        DocumentSF["Document Processing<br/>documentVersionId"]
+        EvaluationSF["Underwriting Evaluation<br/>evaluationId"]
+        BindingSF["Policy Binding<br/>bindingId"]
+        WorkflowAlias["Immutable Versions<br/>CANDIDATE / PROD aliases"]
+    end
+
+    subgraph WORK_QUEUES["Workload-owned queues"]
+        ScanQueue["Document Scan SQS"]
+        DocumentQueue["Document Processing SQS"]
+        AIQueue["AI Evaluation SQS"]
+        ExternalQueues["Provider-specific External SQS"]
+        BindingQueue["Policy Binding SQS"]
+        RealtimeQueue["Realtime Notification SQS"]
+        ConsumerQueues["Notification / Projection / Analytics SQS"]
+        DLQs["Per-workload DLQs<br/>diagnose before audited redrive"]
+    end
+
+    TaskEnvelope["Typed Task Envelope<br/>schemaVersion · workflowVersion · attemptId<br/>idempotencyKey · deadline · inputRef · taskToken"]
+    DocCallback["Persist document result<br/>then callback Document Workflow"]
+    AICallback["Persist AI result<br/>then callback Evaluation Workflow"]
+    ExternalCallback["Persist external result<br/>then callback Evaluation Workflow"]
+    BindingCallback["Persist binding result<br/>then callback Binding Workflow"]
+end
+
+PlatformModule --> OutboxTable
+AuditModule --> OutboxTable
+OutboxService --> OutboxTable
+OutboxService --> EventBridge
+EventBridge --> WorkflowStarter
+WorkflowStarter --> WorkflowAlias
+WorkflowAlias --> DocumentSF
+WorkflowAlias --> EvaluationSF
+WorkflowAlias --> BindingSF
+DocumentSF --> ScanQueue
+DocumentSF --> DocumentQueue
+EvaluationSF --> AIQueue
+EvaluationSF --> ExternalQueues
+BindingSF --> BindingQueue
+EventBridge --> RealtimeQueue
+EventBridge --> ConsumerQueues
+TaskEnvelope -. common contract .-> ScanQueue
+TaskEnvelope -. common contract .-> DocumentQueue
+TaskEnvelope -. common contract .-> AIQueue
+TaskEnvelope -. common contract .-> ExternalQueues
+TaskEnvelope -. common contract .-> BindingQueue
+ScanQueue --> DocScanService --> MalwareScan
+DocumentQueue --> DocProcessService --> OCRTask
+AIQueue --> AIWorkerService
+ExternalQueues --> ExternalWorkerService
+BindingQueue --> BindingWorkerService
+ScanQueue --> DLQs
+DocumentQueue --> DLQs
+AIQueue --> DLQs
+ExternalQueues --> DLQs
+BindingQueue --> DLQs
+DocScanService --> DocCallback --> DocumentSF
+DocProcessService --> DocCallback
+AIWorkerService --> AICallback --> EvaluationSF
+ExternalWorkerService --> ExternalCallback --> EvaluationSF
+BindingWorkerService --> BindingCallback --> BindingSF
+ProcessingRequested --> OutboxTable
+DocumentReadyEvent --> OutboxTable
+RealtimeQueue --> RealtimePublisher
+ConsumerQueues --> ExternalSystems
+
+%% =====================================================================
+%% UNDERWRITING EVALUATION
+%% =====================================================================
+subgraph EVALUATION["UNDERWRITING EVALUATION — FIXED SUBMISSION & RELEASE"]
+    EvaluationRequested["Evaluation Requested"]
+    PinRelease["Pin Submission + EvaluationReleaseManifest"]
+    DocumentBarrier{"Required Document Versions Ready?"}
+    SourceBundle["Build Source Bundle"]
+    ReconcileFacts["Reconcile Field Candidates"]
+    ValidateFacts{"Complete and Valid?"}
+    RiskSnapshot["Immutable Validated Risk Snapshot"]
+    RiskFeatures["Deterministic Risk Features"]
+    EligibilityGate{"Versioned Eligibility Rules"}
+    DeclineReview["RULE_BASED_DECLINE_REVIEW"]
+    ParallelStages["Parallel Controlled Stages"]
+    ExternalChecks["External Checks"]
+    AIAnalysis["AI Risk Analysis"]
+    DeterministicPricing["Deterministic Pricing"]
+    JoinResults["Join + Validate Typed Results"]
+    FinalGate{"Deterministic Decision + Authority Gate"}
+    AutoQuote["AUTO_QUOTE"]
+    ReferUW["REFER_UNDERWRITER"]
+    ReferSenior["REFER_SENIOR_UNDERWRITER"]
+    RequestInfo["AWAITING_INFORMATION<br/>Evaluation ends"]
+    OperationalHold["OPERATIONAL_HOLD"]
+end
+
+EvaluationSF --> EvaluationRequested --> PinRelease --> DocumentBarrier
+Completeness --> DocumentBarrier
+DocumentBarrier -->|no or invalid| RequestInfo
+DocumentBarrier -->|ready| SourceBundle --> ReconcileFacts --> ValidateFacts
+ValidateFacts -->|no| RequestInfo
+ValidateFacts -->|yes| RiskSnapshot --> RiskFeatures --> EligibilityGate
+EligibilityGate -->|knockout| DeclineReview
+EligibilityGate -->|pass or refer| ParallelStages
+ParallelStages --> ExternalChecks
+ParallelStages --> AIAnalysis
+ParallelStages --> DeterministicPricing
+ExternalChecks --> JoinResults
+AIAnalysis --> JoinResults
+DeterministicPricing --> JoinResults
+JoinResults --> FinalGate
+FinalGate --> AutoQuote
+FinalGate --> ReferUW
+FinalGate --> ReferSenior
+FinalGate --> RequestInfo
+FinalGate --> OperationalHold
+
+%% =====================================================================
+%% CONTROLLED AI AGENT AND MODEL GATEWAY
+%% =====================================================================
+subgraph AI_AGENT["CONTROLLED AI UNDERWRITER AGENT — FIXED, BOUNDED, READ-ONLY"]
+    AIEnvelope["AI_RISK_ANALYSIS Task"]
+    ContextAssembler["Context Assembler<br/>fixed configuration and evidence refs"]
+    QueryPlanner["Deterministic Query Planner"]
+    EvidenceGateway["Tenant-scoped Evidence Gateway"]
+
+    subgraph ANALYZERS["Product-configured parallel analyzers"]
+        BusinessAnalyzer["Business / Operations"]
+        ExposureAnalyzer["Professional Exposure"]
+        ClaimsAnalyzer["Claims / Loss History"]
+        FinancialAnalyzer["Financial / Limit"]
+        DocumentAnalyzer["Document Conflict"]
+    end
+
+    ConsistencyCheck["Cross-evidence Consistency Check"]
+    AssessmentSynthesis["Risk Assessment Synthesizer"]
+    OutputSchema["Structured Output Schema"]
+    CitationValidator["Citation / Evidence Validator"]
+    SafetyValidator["Safety / Policy Validator"]
+    ConfidenceValidator["Confidence / Automation Validator"]
+    AIResult["Immutable AI Risk Assessment<br/>COMPLETE · INCOMPLETE · INVALID · SECURITY_BLOCKED"]
+
+    subgraph MODEL_GATEWAY["Versioned Model Gateway"]
+        TaskPolicy["ModelTaskPolicy<br/>model · prompt · schema · region"]
+        Guardrails["Input / Output Guardrails"]
+        Budget["Call · token · cost · deadline budget"]
+        CircuitBreaker["Provider Circuit Breaker"]
+        ApprovedFallback["Pre-evaluated Fallback Policy"]
+        Bedrock["Amazon Bedrock"]
+    end
+
+    ToolScope["Server-injected scope<br/>tenant · product · submission · KB release"]
+    ReadOnlyTools["Read-only evidence tools<br/>search evidence · search guidelines · get fragment"]
+end
+
+AIWorkerService --> AIEnvelope --> ContextAssembler --> QueryPlanner --> EvidenceGateway
+ToolScope --> EvidenceGateway
+EvidenceGateway --> ReadOnlyTools
+EvidenceGateway --> BusinessAnalyzer
+EvidenceGateway --> ExposureAnalyzer
+EvidenceGateway --> ClaimsAnalyzer
+EvidenceGateway --> FinancialAnalyzer
+EvidenceGateway --> DocumentAnalyzer
+BusinessAnalyzer --> ConsistencyCheck
+ExposureAnalyzer --> ConsistencyCheck
+ClaimsAnalyzer --> ConsistencyCheck
+FinancialAnalyzer --> ConsistencyCheck
+DocumentAnalyzer --> ConsistencyCheck
+ConsistencyCheck --> AssessmentSynthesis --> OutputSchema --> CitationValidator --> SafetyValidator --> ConfidenceValidator --> AIResult
+ContextAssembler --> TaskPolicy --> Guardrails --> Budget --> CircuitBreaker --> Bedrock
+CircuitBreaker --> ApprovedFallback --> Bedrock
+Bedrock --> AssessmentSynthesis
+AIResult --> AIAnalysis
+
+%% =====================================================================
+%% APPROVED KNOWLEDGE AND RAG
+%% =====================================================================
+subgraph RAG["APPROVED KNOWLEDGE RELEASE & RAG"]
+    ApprovedSources["Approved Product / Guideline Documents"]
+    KBSecurity["Security / Parsing Validation"]
+    KBMetadata["Metadata<br/>tenant · product · jurisdiction · effective dates"]
+    Chunking["Semantic Chunking<br/>source version · page · heading · hash"]
+    Embedding["Approved Embedding Policy"]
+    ConflictCheck["Authority / Conflict Check"]
+    KBIndexBuild["Build Sydney + Melbourne Indexes"]
+    RetrievalEval["Retrieval / Grounding Evaluation"]
+    KBApproval["Maker-checker Approval"]
+    KBRelease["Immutable Knowledge Release"]
+    KBAlias["Tenant / Product Active Alias"]
+    MetadataFilter["Mandatory Metadata Filter"]
+    HybridSearch["Hybrid BM25 + Vector Search"]
+    Reranking["Reranking"]
+    CitationBuilder["Evidence + Citation Builder"]
+end
+
+KnowledgeReleaseUI --> ApprovedSources --> KBSecurity --> KBMetadata --> Chunking
+Chunking --> Embedding
+Chunking --> ConflictCheck
+Embedding --> KBIndexBuild
+ConflictCheck --> KBIndexBuild --> RetrievalEval --> KBApproval --> KBRelease --> KBAlias
+EvidenceGateway --> MetadataFilter --> HybridSearch --> Reranking --> CitationBuilder --> EvidenceGateway
+KBAlias --> MetadataFilter
+OpenSearchEndpoint --> HybridSearch
+
+%% =====================================================================
+%% HUMAN REVIEW, QUOTE AND BINDING
+%% =====================================================================
+subgraph HUMAN_QUOTE_BIND["HUMAN REVIEW, QUOTE & BINDING"]
+    ReviewTask["Single Active HumanReviewTask"]
+    PrimaryAssignment["Primary Underwriter Assignment"]
+    EvidencePackage["Facts + Evidence + Rules + AI + Pricing"]
+    HumanAssessment["Immutable Human Assessment"]
+    OverrideReason["Structured Override Reason"]
+    AuthorityRecheck["Assignment + Authority + Version Recheck"]
+    ApprovalTask["Independent Maker-checker ApprovalTask"]
+    HumanCallback["Complete Human Callback"]
+    PricingResult["Immutable Pricing Result"]
+    QuoteAssembler["Quote Assembly<br/>approved clauses only"]
+    QuoteVersion["Immutable Quote Version<br/>coverage · excess · premium · expiry"]
+    QuoteAcceptance["Exact QuoteVersion Acceptance Fact"]
+    BindingRequest["Binding Request + Outbox"]
+    QueryPAS["Query PAS on unknown outcome"]
+    BindingResult["Bound / Pending / Failed / Manual Reconciliation"]
+end
+
+ReferUW --> ReviewTask
+ReferSenior --> ReviewTask
+DeclineReview --> ReviewTask
+ReviewTask --> PrimaryAssignment --> EvidencePackage
+EvidencePackage --> CaseWorkspace
+HumanDecisionUI --> HumanAssessment --> OverrideReason --> AuthorityRecheck
+AuthorityRecheck -->|within authority| HumanCallback
+AuthorityRecheck -->|exceeds authority| ApprovalTask --> HumanCallback
+HumanCallback --> EvaluationSF
+DeterministicPricing --> PricingResult
+AutoQuote --> QuoteAssembler
+HumanCallback --> QuoteAssembler
+PricingResult --> QuoteAssembler --> QuoteVersion
+QuoteVersion --> QuoteReview --> QuoteAcceptanceUI --> QuoteAcceptance --> BindingRequest --> BindingSF
+BindingSF --> QueryPAS --> BindingResult
+
+%% =====================================================================
+%% DATA STORES AND SCHEMA OWNERSHIP
+%% =====================================================================
+subgraph DATA_PLANE["PERSISTENT DATA — BUSINESS FACTS, ARTIFACTS & REBUILDABLE INDEXES"]
+    subgraph AURORA_SCHEMAS["Aurora schemas — one write owner each"]
+        IdentitySchema["identity<br/>Identity · TenantMembership"]
+        DistributionSchema["distribution<br/>Brokerage · Membership · Appointment"]
+        SubmissionSchema["submission<br/>Application · Submission · RFI"]
+        DocumentSchema["document<br/>DocumentVersion · Extraction · Evidence"]
+        UnderwritingSchema["underwriting<br/>Case · Evaluation · Snapshot · Assessment"]
+        PricingSchema["pricing<br/>PricingResult · QuoteVersion"]
+        BindingSchema["binding<br/>Acceptance · PolicyBinding"]
+        ConfigSchema["configuration<br/>Product · Rules · Authority · AI / KB Release"]
+        PlatformSchema["platform<br/>StageExecution · Attempt · Idempotency · Outbox"]
+        AuditSchema["audit<br/>append-only AuditRecord"]
+    end
+
+    subgraph S3_DOMAINS["S3 security domains"]
+        S3Quarantine[("document-quarantine")]
+        S3Originals[("document-originals")]
+        S3Derived[("document-derived-artifacts")]
+        S3KB[("knowledge-release-artifacts")]
+        S3Eval[("ai-evaluation-artifacts")]
+        S3Audit[("cross-account audit archive<br/>Object Lock")]
+    end
+
+    subgraph SEARCH_DOMAINS["OpenSearch Serverless private collections"]
+        KBCollection[("underwriting-kb-vector")]
+        BusinessSearch[("business-search<br/>not an AI authority source")]
+    end
+end
+
+RepositoryPorts --> RDSProxy --> AuroraPrimary
+DocScanService --> RDSProxy
+DocProcessService --> RDSProxy
+AIWorkerService --> RDSProxy
+ExternalWorkerService --> RDSProxy
+BindingWorkerService --> RDSProxy
+OutboxService --> RDSProxy
+AuroraPrimary --> IdentitySchema
+AuroraPrimary --> DistributionSchema
+AuroraPrimary --> SubmissionSchema
+AuroraPrimary --> DocumentSchema
+AuroraPrimary --> UnderwritingSchema
+AuroraPrimary --> PricingSchema
+AuroraPrimary --> BindingSchema
+AuroraPrimary --> ConfigSchema
+AuroraPrimary --> PlatformSchema
+AuroraPrimary --> AuditSchema
+ProjectionQueries --> RDSProxy
+Quarantine --> S3Quarantine
+Originals --> S3Originals
+EvidenceFragments --> S3Derived
+KBRelease --> S3KB
+AIResult --> S3Eval
+AuditSchema --> S3Audit
+OpenSearchEndpoint --> KBCollection
+OpenSearchEndpoint --> BusinessSearch
+KBIndexBuild --> KBCollection
+ProjectionQueries --> BusinessSearch
+
+%% =====================================================================
+%% EXTERNAL INTEGRATIONS
+%% =====================================================================
+subgraph EXTERNAL["APPROVED EXTERNAL INTEGRATIONS"]
+    CompanyRegistry["Company / ABN Registry"]
+    ClaimsProvider["Claims History Provider"]
+    ComplianceProvider["Sanctions / Compliance Provider"]
+    PAS["Policy Administration System"]
+    SES["Amazon SES Notifications"]
+    SNS["Amazon SNS Notifications"]
+end
+
+Allowlist --> CompanyRegistry
+Allowlist --> ClaimsProvider
+Allowlist --> ComplianceProvider
+Allowlist --> PAS
+ExternalChecks --> ExternalQueues
+QueryPAS --> PAS
+ConsumerQueues --> SES
+ConsumerQueues --> SNS
+
+%% =====================================================================
+%% SECURITY, KEYS AND CONFIGURATION
+%% =====================================================================
+subgraph SECURITY["SECURITY, KEYS & CONFIGURATION"]
+    KMS["Domain-specific Customer-managed KMS Keys"]
+    MultiRegionKey["Multi-Region KMS Key<br/>Cognito MRR only where required"]
+    Secrets["Secrets Manager<br/>rotation and Melbourne replication"]
+    AppConfig["AWS AppConfig<br/>validated flags · kill switches"]
+    IAMRoles["Per-service IAM Task Roles<br/>least privilege"]
+    RLS["PostgreSQL RLS<br/>transaction-scoped tenant context"]
+    CloudTrail["Organization CloudTrail"]
+    Config["AWS Config"]
+    GuardDuty["GuardDuty"]
+    SecurityHub["Security Hub"]
+    Inspector["Inspector"]
+    AccessAnalyzer["IAM Access Analyzer"]
+    Macie["Macie"]
+    Backup["Cross-account locked backups<br/>restore tests"]
+end
+
+KMS --> AuroraPrimary
+KMS --> S3Originals
+KMS --> S3Derived
+KMS --> KBCollection
+MultiRegionKey --> BrokerPool
+MultiRegionKey --> WorkforcePool
+Secrets --> CoreService
+Secrets --> ExternalWorkerService
+Secrets --> BindingWorkerService
+AppConfig --> CoreService
+AppConfig --> AIWorkerService
+IAMRoles --> ECSCluster
+RLS --> AuroraPrimary
+CloudTrail --> S3Audit
+Config --> SecurityHub
+GuardDuty --> SecurityHub
+Inspector --> SecurityHub
+AccessAnalyzer --> SecurityHub
+Macie --> SecurityHub
+AuroraPrimary --> Backup
+
+%% =====================================================================
+%% OBSERVABILITY AND AUDIT
+%% =====================================================================
+subgraph OBSERVABILITY["OBSERVABILITY, AI QUALITY & OPERATIONS"]
+    ADOT["ADOT / OpenTelemetry"]
+    XRay["X-Ray / ServiceLens"]
+    CloudWatchLogs["Structured CloudWatch Logs<br/>no tokens · prompts · documents · unnecessary PII"]
+    Metrics["CloudWatch Metrics"]
+    Synthetics["CloudWatch Synthetics"]
+    OpsDashboards["Operational Dashboards"]
+    AIQuality["AI Quality / Safety<br/>citation · abstention · injection · override"]
+    BusinessKPIs["Business KPIs<br/>STP · RFI · referral · turnaround · binding"]
+    Alarms["Composite Alarms<br/>owner · severity · runbook"]
+    SIEM["Enterprise SIEM"]
+end
+
+FrontendObs --> ADOT
+CoreService -. telemetry .-> ADOT
+DocProcessService -. telemetry .-> ADOT
+AIWorkerService -. telemetry .-> ADOT
+EvaluationSF -. telemetry .-> ADOT
+ADOT --> XRay
+ADOT --> CloudWatchLogs
+ADOT --> Metrics
+Synthetics --> Metrics
+Metrics --> OpsDashboards
+AIResult --> AIQuality --> OpsDashboards
+AuditSchema --> BusinessKPIs --> OpsDashboards
+OpsDashboards --> Alarms
+SecurityHub --> SIEM
+CloudWatchLogs --> SIEM
+
+%% =====================================================================
+%% CI/CD, MIGRATIONS AND AI RELEASE
+%% =====================================================================
+subgraph DELIVERY["CI/CD, IMMUTABLE RELEASES & INFRASTRUCTURE AS CODE"]
+    Monorepo["GitHub Monorepo"]
+    GitHubOIDC["GitHub Actions OIDC<br/>no long-lived AWS keys"]
+    CodeQuality["Typecheck · Lint · Unit · Integration · E2E"]
+    ContractTests["OpenAPI · Event · Task Contract Compatibility"]
+    SecurityTests["SAST · Dependency · Secret · Container · IaC Scan"]
+    RuleRegression["Eligibility / Pricing Golden Regression"]
+    AIEvaluation["AI / RAG Offline + Security Evaluation"]
+    BuildOnce["Build Once"]
+    SharedECR["Shared Services ECR<br/>immutable image digests"]
+    ReleaseArtifacts["S3 Release Artifacts<br/>frontend · lambda · migration · KB"]
+    SignedManifest["Signed Release Manifest<br/>SBOM · provenance · approvals"]
+    DeployDev["Deploy Development"]
+    DeployStage["Promote same digest to Staging"]
+    ProdApproval["Protected Production Approval"]
+    FrontendCanary["CloudFront header test<br/>1% → 5% → 15%"]
+    APICanary["Core API 10% Canary / Blue-Green"]
+    WorkerRolling["Worker Rolling + Circuit Breaker"]
+    DBMigration["Expand → Backfill → Switch → Contract<br/>one-shot ECS migration task"]
+    WorkflowRelease["Step Functions Version + Alias"]
+    AIRelease["AI Release<br/>Shadow → Human-only Canary → Active"]
+    Rollback["Previous Approved Manifest / Alias"]
+    CDK["AWS CDK TypeScript<br/>Change Set + cdk-nag"]
+end
+
+Monorepo --> GitHubOIDC --> CodeQuality --> ContractTests --> SecurityTests
+SecurityTests --> RuleRegression --> AIEvaluation --> BuildOnce
+BuildOnce --> SharedECR
+BuildOnce --> ReleaseArtifacts
+SharedECR --> SignedManifest
+ReleaseArtifacts --> SignedManifest
+SignedManifest --> DeployDev --> DeployStage --> ProdApproval
+ProdApproval --> FrontendCanary
+ProdApproval --> APICanary
+ProdApproval --> WorkerRolling
+ProdApproval --> DBMigration
+ProdApproval --> WorkflowRelease
+ProdApproval --> AIRelease
+FrontendCanary --> Rollback
+APICanary --> Rollback
+WorkerRolling --> Rollback
+WorkflowRelease --> Rollback
+AIRelease --> Rollback
+CDK --> DeployDev
+CDK --> DeployStage
+CDK --> ProdApproval
+
+%% =====================================================================
+%% MULTI-ACCOUNT AND DISASTER RECOVERY
+%% =====================================================================
+subgraph ACCOUNTS_DR["MULTI-ACCOUNT GOVERNANCE & REGIONAL RECOVERY"]
+    ManagementAccount["Management Account<br/>Organizations / SCP"]
+    SecurityAccount["Security Account"]
+    LogArchiveAccount["Log Archive Account"]
+    SharedAccount["Shared Services / CI Account"]
+    DevAccount["Development Account"]
+    StageAccount["Staging Account"]
+    ProdAccount["Production Account"]
+    RecoveryAccount["Backup / Recovery Account"]
+
+    subgraph MELBOURNE["Melbourne ap-southeast-4 — Warm Standby ≥2 AZ"]
+        MelAPI["Regional REST + WebSocket"]
+        MelCompute["Warm Core API / Workers<br/>workflow definitions"]
+        MelAurora[("Aurora Global Secondary")]
+        MelS3[("Replicated trusted S3 domains")]
+        MelKB[("Prebuilt OpenSearch indexes")]
+        WriteFence["Write Fence + Region Epoch"]
+        RecoveryScanner["Checkpoint Recovery Scanner<br/>new attempts, original business identity"]
+    end
+
+    subgraph SINGAPORE["Singapore ap-southeast-1 — Identity DR"]
+        BrokerReplica["Broker Cognito MRR Replica"]
+        WorkforceReplica["Workforce Cognito MRR Replica"]
+        IdentityDRLimits["Existing sign-in only during DR<br/>onboarding and profile writes paused"]
+    end
+end
+
+ManagementAccount --> SecurityAccount
+ManagementAccount --> LogArchiveAccount
+ManagementAccount --> SharedAccount
+ManagementAccount --> DevAccount
+ManagementAccount --> StageAccount
+ManagementAccount --> ProdAccount
+ProdAccount --> RecoveryAccount
+GitHubOIDC --> SharedAccount
+SecurityHub --> SecurityAccount
+S3Audit --> LogArchiveAccount
+Backup --> RecoveryAccount
+AuroraPrimary -. "Aurora Global<br/>RPO ≤ 5 min" .-> MelAurora
+S3Originals -. CRR .-> MelS3
+S3Derived -. CRR .-> MelS3
+S3KB -. immutable release .-> MelKB
+BrokerPool -. Cognito MRR .-> BrokerReplica
+WorkforcePool -. Cognito MRR .-> WorkforceReplica
+BrokerReplica --> IdentityDRLimits
+WorkforceReplica --> IdentityDRLimits
+DNS -. "Incident Commander authorized<br/>RTO ≤ 1 hour" .-> MelAPI
+MelAPI --> WriteFence --> MelCompute
+MelCompute --> MelAurora
+MelCompute --> MelS3
+MelCompute --> MelKB
+MelAurora --> RecoveryScanner --> MelCompute
+
+%% =====================================================================
+%% STYLES
+%% =====================================================================
+classDef actor fill:#F1F5F9,stroke:#475569,color:#0F172A,stroke-width:1.4px;
+classDef edge fill:#E8F1FF,stroke:#3973B9,color:#10233F,stroke-width:1.4px;
+classDef frontend fill:#EEF2FF,stroke:#6366F1,color:#29255F,stroke-width:1.3px;
+classDef compute fill:#EAF8F1,stroke:#26835B,color:#123B2A,stroke-width:1.4px;
+classDef workflow fill:#FFF5DE,stroke:#C28114,color:#513509,stroke-width:1.4px;
+classDef data fill:#F3E8FF,stroke:#7C3AED,color:#35145F,stroke-width:1.4px;
+classDef ai fill:#FDF2F8,stroke:#BE185D,color:#5C1536,stroke-width:1.4px;
+classDef external fill:#FFF1F2,stroke:#BE4758,color:#5B1721,stroke-width:1.4px;
+classDef ops fill:#ECFEFF,stroke:#0E7490,color:#164E63,stroke-width:1.4px;
+classDef decision fill:#FEF3C7,stroke:#B45309,color:#4A2604,stroke-width:1.6px;
+
+class Broker,Underwriter,SeniorUW,ProductAdmin,PlatformOps,ExternalSystems actor;
+class DNS,Shield,BrokerCF,BrokerWAF,BrokerHeaders,BrokerOAC,UWCF,UWWAF,UWHeaders,UWOAC,AdminCF,AdminWAF,AdminHeaders,AdminOAC,BrokerPool,WorkforcePool,CorporateIdP,BrokerClient,UWClient,AdminClient,RESTAuthorizers,RealtimeTicket,MembershipAuthz,OperatorSSO,APIDNS,WSDNS,APIWAF,RESTAPI,RequestLimits,VPCLink,WSAPI edge;
+class BrokerShell,BrokerDashboard,ApplicationDraft,DynamicForm,Autosave,DocumentUpload,BrokerRFI,EvaluationTimeline,QuoteReview,QuoteAcceptanceUI,UWShell,ReviewQueueUI,CaseWorkspace,EvidenceViewer,FactsUI,ConflictUI,RulesUI,AIRiskUI,PricingUI,AuthorityUI,HumanDecisionUI,AssignmentUI,AuditTimeline,AdminShell,ProductReleaseUI,RuleReleaseUI,PricingReleaseUI,AuthorityConfigUI,ClauseLibraryUI,ModelPolicyUI,KnowledgeReleaseUI,OperationsUI,AuditSearchUI,DesignSystem,GeneratedClient,AuthPackage,DomainTypes,FeatureFlags,FrontendObs,I18n,TestKit,Router,QueryClient,FormRuntime,RealtimeClient,Polling,UploadClient,ErrorBoundary,RouteGuard frontend;
+class InternalALB,ECSCluster,CoreService,DocScanService,DocProcessService,AIWorkerService,ExternalWorkerService,BindingWorkerService,OutboxService,ConnectLambda,RealtimePublisher,TraceContext,ErrorHandler,AuthContext,ActiveContext,ResourcePolicy,SchemaValidation,Concurrency,BrokerBFF,UnderwriterBFF,AdminBFF,ApplicationLayer,IdentityModule,DistributionModule,SubmissionModule,DocumentModule,UnderwritingModule,PricingModule,BindingModule,ConfigurationModule,PlatformModule,AuditModule,TransitionPolicy,EligibilityPolicy,ConfidencePolicy,PricingPolicy,AuthorityPolicy,DecisionPolicy,QuotePolicy,FreshnessPolicy,RepositoryPorts,ProjectionQueries,UploadSession,PresignedUpload,UploadCompleted,UploadVerification,ProcessingRequested,MalwareScan,RejectDocument,DocumentReadyEvent,OCRTask,OCRLayout,Normalise,FieldCandidates,FieldValidation,EvidenceFragments,Reconciliation,ConflictDetection,Completeness,ReviewTask,PrimaryAssignment,EvidencePackage,HumanAssessment,OverrideReason,AuthorityRecheck,ApprovalTask,HumanCallback,PricingResult,QuoteAssembler,QuoteVersion,QuoteAcceptance,BindingRequest,QueryPAS,BindingResult,MelAPI,MelCompute,WriteFence,RecoveryScanner compute;
+class OutboxTable,EventBridge,WorkflowStarter,DocumentSF,EvaluationSF,BindingSF,WorkflowAlias,ScanQueue,DocumentQueue,AIQueue,ExternalQueues,BindingQueue,RealtimeQueue,ConsumerQueues,DLQs,TaskEnvelope,DocCallback,AICallback,ExternalCallback,BindingCallback,EvaluationRequested,PinRelease,DocumentBarrier,SourceBundle,ReconcileFacts,ValidateFacts,RiskSnapshot,RiskFeatures,ParallelStages,ExternalChecks,AIAnalysis,DeterministicPricing,JoinResults,RequestInfo,OperationalHold workflow;
+class BrokerAssets,UWAssets,AdminAssets,ConnectionRegistry,RDSProxy,AuroraPrimary,OpenSearchEndpoint,Quarantine,Originals,IdentitySchema,DistributionSchema,SubmissionSchema,DocumentSchema,UnderwritingSchema,PricingSchema,BindingSchema,ConfigSchema,PlatformSchema,AuditSchema,S3Quarantine,S3Originals,S3Derived,S3KB,S3Eval,S3Audit,KBCollection,BusinessSearch,MelAurora,MelS3,MelKB data;
+class AIEnvelope,ContextAssembler,QueryPlanner,EvidenceGateway,BusinessAnalyzer,ExposureAnalyzer,ClaimsAnalyzer,FinancialAnalyzer,DocumentAnalyzer,ConsistencyCheck,AssessmentSynthesis,OutputSchema,CitationValidator,SafetyValidator,ConfidenceValidator,AIResult,TaskPolicy,Guardrails,Budget,CircuitBreaker,ApprovedFallback,Bedrock,ToolScope,ReadOnlyTools,ApprovedSources,KBSecurity,KBMetadata,Chunking,Embedding,ConflictCheck,KBIndexBuild,RetrievalEval,KBApproval,KBRelease,KBAlias,MetadataFilter,HybridSearch,Reranking,CitationBuilder ai;
+class EligibilityGate,FinalGate,DeclineReview,AutoQuote,ReferUW,ReferSenior decision;
+class NAT,NetworkFirewall,Allowlist,DataEndpoints,RuntimeEndpoints,SecurityEndpoints,AsyncEndpoints,BedrockEndpoint,CompanyRegistry,ClaimsProvider,ComplianceProvider,PAS,SES,SNS external;
+class KMS,MultiRegionKey,Secrets,AppConfig,IAMRoles,RLS,CloudTrail,Config,GuardDuty,SecurityHub,Inspector,AccessAnalyzer,Macie,Backup,ADOT,XRay,CloudWatchLogs,Metrics,Synthetics,OpsDashboards,AIQuality,BusinessKPIs,Alarms,SIEM,Monorepo,GitHubOIDC,CodeQuality,ContractTests,SecurityTests,RuleRegression,AIEvaluation,BuildOnce,SharedECR,ReleaseArtifacts,SignedManifest,DeployDev,DeployStage,ProdApproval,FrontendCanary,APICanary,WorkerRolling,DBMigration,WorkflowRelease,AIRelease,Rollback,CDK,ManagementAccount,SecurityAccount,LogArchiveAccount,SharedAccount,DevAccount,StageAccount,ProdAccount,RecoveryAccount,BrokerReplica,WorkforceReplica,IdentityDRLimits ops;
