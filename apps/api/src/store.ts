@@ -11,9 +11,9 @@ import {
 } from '@prism/contracts'
 
 /**
- * Day-1 state store: in-memory, deliberately. Deploys reset it and demos start
- * fresh — acceptable for the demo, and it keeps deployment dependency-free.
- * Supabase persistence (and with it, resume-across-deploys) is a Day-2 task.
+ * Legacy local-demo store: in-memory by design so mock runs need no external
+ * dependencies. The production rebuild replaces this with Aurora-backed
+ * modules, Transactional Outbox, and recoverable workflow state.
  */
 export interface ApplicationResult {
   status: ApplicationStatus

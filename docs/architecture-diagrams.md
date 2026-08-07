@@ -1,30 +1,30 @@
-# Prism AI Underwriter Agent 架构图集
+# Prism AI Underwriter Agent Architecture Diagram Collection
 
-> 文档状态：已确认目标架构的可视化视图
+> Document status: confirmed visual views of the target architecture
 >
-> 建议讲解顺序：系统上下文 → 业务生命周期 → 逻辑组件 → 核保时序 → AI Agent → 前后端边界 → 物理部署 → 发布 → 容灾
+> Recommended presentation order: system context -> business lifecycle -> logical components -> underwriting sequence -> AI Agent -> frontend/backend boundary -> physical deployment -> release -> disaster recovery
 >
-> 详细依据：[总体架构](./architecture.md) · [后端架构](./backend-architecture.md) · [前端架构](./frontend-architecture.md) · [部署架构](./deployment-architecture.md)
+> Detailed basis: [overall architecture](./architecture.md) · [backend architecture](./backend-architecture.md) · [frontend architecture](./frontend-architecture.md) · [deployment architecture](./deployment-architecture.md)
 
-这些图从不同视角描述同一目标系统。图用于沟通边界，文字架构文档仍是约束、异常语义和非功能要求的事实来源。
+These diagrams describe the same target system from different viewpoints. Diagrams are for communicating boundaries; the written architecture documents remain the source of truth for constraints, failure semantics, and non-functional requirements.
 
-## AWS 生产部署架构图
+## AWS Production Deployment Architecture Diagram
 
-[单独打开或下载 AWS 架构 SVG](./diagrams/prism-aws-production-architecture.svg) · [下载高分辨率 PNG](./diagrams/prism-aws-production-architecture.png) · [查看生成脚本](../scripts/generate-aws-architecture.mjs)
+[Open or download the AWS architecture SVG](./diagrams/prism-aws-production-architecture.svg) · [download high-resolution PNG](./diagrams/prism-aws-production-architecture.png) · [view generation script](../scripts/generate-aws-architecture.mjs)
 
 ![Prism AI Underwriter Agent AWS production architecture](./diagrams/prism-aws-production-architecture.svg)
 
-该图使用 AWS 官方 2026-04-30 Architecture Icons，聚焦生产部署拓扑：Global Edge、Sydney 三 AZ 主区、VPC 私有计算与隔离数据子网、托管工作流和队列、AI/RAG 服务、安全与可观测性、外部系统、Melbourne warm standby 和 Singapore Cognito MRR。它是面试中讲解 AWS 选型和运行路径的主图；内部领域组件继续使用下方的详细 Mermaid 图。
+This diagram uses the official AWS Architecture Icons from 2026-04-30 and focuses on the production deployment topology: Global Edge, Sydney three-AZ primary region, private VPC compute and isolated data subnets, managed workflows and queues, AI/RAG services, security and observability, external systems, Melbourne warm standby, and Singapore Cognito MRR. This is the main interview diagram for explaining AWS choices and runtime flow; internal domain components remain in the detailed Mermaid diagrams below.
 
-## 详细生产总架构 SVG
+## Detailed Production Architecture SVG
 
-[单独打开或下载详细 SVG](./diagrams/prism-production-detailed.svg) · [查看可编辑 Mermaid 源码](./diagrams/prism-production-detailed.mmd)
+[Open or download the detailed SVG](./diagrams/prism-production-detailed.svg) · [view editable Mermaid source](./diagrams/prism-production-detailed.mmd)
 
-详细图展开前端 Feature、身份、API Pipeline、Core API 领域模块、文档处理、Workflow/Queue/Callback Worker、Underwriting Evaluation、Controlled AI Agent、RAG、Human Review、Quote/Binding、数据、安全、可观测性、CI/CD、多账户和跨区域恢复。该图面向缩放浏览和深度架构讨论；普通文档阅读优先使用下面的 Overview。
+The detailed diagram expands frontend features, identity, API pipeline, Core API domain modules, document processing, Workflow/Queue/Callback Workers, Underwriting Evaluation, Controlled AI Agent, RAG, Human Review, Quote/Binding, data, security, observability, CI/CD, multi-account structure, and cross-region recovery. It is intended for zoomed inspection and deep architecture discussion; ordinary documentation reading should start with the overview below.
 
-## 总体生产架构 SVG
+## Production Overview SVG
 
-[单独打开或下载 SVG](./diagrams/prism-production-overview.svg)
+[Open or download SVG](./diagrams/prism-production-overview.svg)
 
 ![Prism AI Underwriter Agent production architecture](./diagrams/prism-production-overview.svg)
 
@@ -68,9 +68,9 @@ flowchart LR
     Platform --> SIEM
 ```
 
-关键表达：AI Agent 是受平台约束的分析能力，不是拥有最终业务权力的独立 Actor。
+Key point: the AI Agent is an analytical capability constrained by the platform, not an independent actor with final business authority.
 
-## 2. Underwriting 业务生命周期
+## 2. Underwriting Business Lifecycle
 
 ```mermaid
 flowchart LR
@@ -105,9 +105,9 @@ flowchart LR
     Binding -->|Unknown provider outcome| Hold
 ```
 
-关键表达：RFI 不在原 Evaluation 内循环；补件产生新 Submission 和新 Evaluation。Human Review 可以等待同一个不可变 Submission。Binding 是报价接受后的独立流程。
+Key point: RFI does not loop inside the original Evaluation; supplementary information creates a new Submission and a new Evaluation. Human Review may wait on the same immutable Submission. Binding is an independent process after quote acceptance.
 
-## 3. 逻辑组件与通信路径
+## 3. Logical Components and Communication Paths
 
 ```mermaid
 flowchart TB
@@ -199,13 +199,13 @@ flowchart TB
     BindW -. persist then callback .-> BindSF
 ```
 
-三种通信语义：
+Three communication semantics:
 
-- HTTP Command：用户明确发起业务动作，Core API 在 Aurora 事务中完成。
-- Workflow Task：Step Functions 通过专用 SQS 请求 Worker 执行受限任务。
-- Domain Event：Aurora Outbox 发布已经发生的事实，Consumer 自己处理重试和幂等。
+- HTTP Command: an explicit user-initiated business action completed by Core API inside an Aurora transaction.
+- Workflow Task: Step Functions requests bounded Worker execution through dedicated SQS queues.
+- Domain Event: Aurora Outbox publishes facts that have already happened; consumers own their own retries and idempotency.
 
-## 4. Submission 到 Evaluation 的端到端时序
+## 4. End-to-End Sequence from Submission to Evaluation
 
 ```mermaid
 sequenceDiagram
@@ -260,7 +260,7 @@ sequenceDiagram
     end
 ```
 
-关键表达：Core API 不作为 Workflow 内部 HTTP 跳板；Worker 先保存结果，再 Callback。
+Key point: Core API is not an internal HTTP relay for the workflow. Workers persist results before callback.
 
 ## 5. Controlled AI Underwriter Agent
 
@@ -307,9 +307,9 @@ flowchart TB
     Decision -->|Uncertainty can only reduce automation| Human
 ```
 
-Agent 只能使用服务端注入作用域的只读工具。Eligibility、Pricing、Authority、最终 Decision 和 Binding 不属于 Agent 工具权限。
+The Agent can only use read-only tools whose scope is injected by the server. Eligibility, Pricing, Authority, final Decision, and Binding are outside the Agent's tool authority.
 
-## 6. 后端内部组件边界
+## 6. Backend Internal Component Boundaries
 
 ```mermaid
 flowchart TB
@@ -392,9 +392,9 @@ flowchart TB
     OutboxWorker --> EventPort
 ```
 
-每张业务表只有一个模块写入 Owner；跨模块调用只能经过公开 Application/Domain 接口，不能深层导入 Repository。
+Each business table has a single module write owner. Cross-module calls must go through public Application/Domain interfaces and must not deep-import repositories.
 
-## 7. 前端 Monorepo 与独立部署
+## 7. Frontend Monorepo and Independent Deployments
 
 ```mermaid
 flowchart TB
@@ -454,9 +454,9 @@ flowchart TB
     AdminCF -. authentication .-> AdminIdentity
 ```
 
-Monorepo 统一依赖和质量门禁；三个应用具有独立 Artifact、Distribution、CSP、身份客户端、灰度和回滚，不采用运行时 Micro-Frontend。
+The monorepo unifies dependencies and quality gates. The three applications have independent artifacts, distributions, CSP, identity clients, canaries, and rollback. Runtime micro-frontends are not used.
 
-## 8. 生产多区域部署
+## 8. Production Multi-Region Deployment
 
 ```mermaid
 flowchart TB
@@ -518,9 +518,9 @@ flowchart TB
     MelbourneCompute --> MelbourneSearch
 ```
 
-业务数据留在澳大利亚；经批准的最少身份数据复制到新加坡。目标为 RTO ≤1 小时、RPO ≤5 分钟。
+Business data remains in Australia. Only the minimum approved identity data is replicated to Singapore. Targets are RTO <= 1 hour and RPO <= 5 minutes.
 
-## 9. 悉尼区域运行时部署
+## 9. Sydney Regional Runtime Deployment
 
 ```mermaid
 flowchart TB
@@ -596,9 +596,9 @@ flowchart TB
     AI --> Endpoints
 ```
 
-Public Subnet 只承载 NAT/网络边界；ECS 无 Public IP；Data Subnet 不具备直接互联网路由。
+Public subnets only host NAT/network boundaries. ECS has no public IP. Data subnets have no direct internet route.
 
-## 10. Build、发布与版本晋级
+## 10. Build, Release, and Version Promotion
 
 ```mermaid
 flowchart LR
@@ -644,9 +644,9 @@ flowchart LR
     Verify -. threshold breached .-> Rollback
 ```
 
-所有环境部署同一 Digest。数据库、Workflow 和 AI Release 分别版本化，不能用“前后端同时上线”代替 N/N−1 兼容。
+All environments deploy the same digest. Database, Workflow, and AI Releases are versioned separately; "deploy frontend and backend together" is not a substitute for N/N-1 compatibility.
 
-## 11. 区域灾备时序
+## 11. Regional Disaster Recovery Sequence
 
 ```mermaid
 sequenceDiagram
@@ -675,4 +675,4 @@ sequenceDiagram
     Monitor->>IC: Confirm business journeys and RTO/RPO evidence
 ```
 
-故障恢复以 Aurora Checkpoint 为事实来源，不复制 Step Functions Execution 或 SQS Message。未验证 AI 依赖时恢复人工核保，但保持自动报价关闭。
+Disaster recovery uses Aurora checkpoints as the source of truth. It does not replicate Step Functions executions or SQS messages. If AI dependencies are not verified, the platform restores manual underwriting while keeping auto-quote disabled.

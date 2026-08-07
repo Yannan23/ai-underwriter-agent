@@ -4,16 +4,21 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-Prism — an AI underwriting agent for professional indemnity insurance. A pnpm
-monorepo: `apps/api` (Hono HTTP/SSE server), `apps/web` (static demo UI),
-`packages/contracts` (Zod schemas — the source of truth for all data shapes),
-`packages/config` (versioned appetite/rating config), `packages/pipeline`
-(the 9-stage underwriting pipeline). See `prism-ai-underwriter-prd.md` for the
-product spec and `day1-build-plan.md` for the build plan.
+Prism — an AI underwriting agent for professional indemnity insurance. The
+current repository still contains an M0 demo (`apps/api`, `apps/web`,
+`packages/contracts`, `packages/config`, and `packages/pipeline`), but the
+target architecture is the production rebuild described in `docs/`: a Core API
+modular monolith, independent asynchronous workers, Aurora PostgreSQL,
+Transactional Outbox, EventBridge, Step Functions Standard, workload-specific
+SQS queues, and three independently deployed frontend portals.
+
+Use `docs/rebuild-plan.md` and `docs/rebuild-execution-plan.md` as the build
+plan. Use `prism-ai-underwriter-prd.md` for product requirements.
 
 ## Commands
 
-- `pnpm dev` / `pnpm demo:mock` — run the API (mock mode needs no API keys)
+- `pnpm dev` / `pnpm demo:mock` — run the legacy local demo API (mock mode
+  needs no API keys)
 - `pnpm test` — Vitest with coverage (100% thresholds, enforced)
 - `pnpm lint` / `pnpm lint:fix` — ESLint (strict, type-checked, spell-checked)
 - `pnpm format` / `pnpm format:check` — Prettier
