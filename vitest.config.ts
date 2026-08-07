@@ -14,9 +14,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
-    // The default test command is deliberately offline. Live provider tests
-    // exist as a named project but must be selected explicitly.
-    project: ['unit', 'integration'],
+    // Select projects via CLI (`--project unit`). Live exists here but is
+    // only run by `pnpm test:live`, never by the default offline scripts.
     projects: [
       {
         extends: true,
@@ -43,7 +42,7 @@ export default defineConfig({
       },
     ],
     coverage: {
-      enabled: true,
+      enabled: false,
       provider: 'v8',
       include: ['apps/*/src/**/*.{ts,tsx}', 'packages/*/src/**/*.{ts,tsx}'],
       // Type-only module: no executable code to cover.
