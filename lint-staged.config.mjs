@@ -1,6 +1,10 @@
 export default {
-  '*.{ts,tsx,js,jsx,mjs,cjs}': ['eslint --max-warnings 0'],
-  // Full type check whenever any TS file is staged (tsc can't check a subset in isolation)
-  '*.{ts,tsx}': [() => 'pnpm typecheck'],
-  '*': ['prettier --check --ignore-unknown'],
+  '*.{ts,tsx}': [
+    'eslint --fix --max-warnings 0',
+    'prettier --write',
+    // tsc cannot reliably validate an isolated subset of project files.
+    () => 'pnpm typecheck',
+  ],
+  '*.{js,jsx,mjs,cjs}': ['eslint --fix --max-warnings 0', 'prettier --write'],
+  '*.{json,jsonc,yaml,yml,md,mdx,css,scss,html}': ['prettier --write'],
 }

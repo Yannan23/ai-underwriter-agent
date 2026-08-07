@@ -21,7 +21,7 @@ loadDotenv({
 
 const guidelines = GuidelineContext.parse(guidelineFixture)
 
-/** Real-model smoke test (build-plan block ⑦): skipped unless a key is configured. */
+/** Real-model smoke test: skipped unless a key is configured. */
 describe.skipIf(!process.env.ANTHROPIC_API_KEY)(
   'risk assessment against real Sonnet',
   () => {
